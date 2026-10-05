@@ -706,4 +706,14 @@ export const en: Dictionary = {
     storage: "Data is stored on the server; passwords are irreversibly hashed.",
     aiData: "AI analyses: your photo is sent to a vision model, the raw result is stored on your account and can be deleted anytime.",
   },
+  shortcuts: {
+    title: "Keyboard Shortcuts",
+    subtitle: "Navigate the app at your fingertips",
+    tabs: "Tab switching",
+    tabsHint: "Jump between Today → Profile",
+    coach: "AI Coach",
+    help: "Shortcut help",
+    escHint: "Press ESC or click to close",
+    desktopNote: "Shortcuts are active with a physical keyboard",
+  },
 };

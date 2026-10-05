@@ -704,6 +704,18 @@ export const tr = {
     storage: "Veriler sunucuda saklanır; şifreler geri döndürülemez şekilde hash'lenir.",
     aiData: "AI analizleri: fotoğrafın vision modeline gönderilir, ham analiz sonucu hesabında saklanır ve dilediğin an silinebilir.",
   },
+
+  shortcuts: {
+    title: "Klavye Kısayolları",
+    subtitle: "Uygulamayı parmaklarınızın ucunda gezinin",
+    tabs: "Sekme geçişi",
+    tabsHint: "Bugün → Profil arası geçiş",
+    coach: "AI Koç",
+    help: "Kısayol yardımı",
+    escHint: "ESC veya tıklayarak kapat",
+    desktopNote: "Kısayollar fiziksel klavye ile etkindir",
+  },
+
 } ;
 
 export type Dictionary = typeof tr;
