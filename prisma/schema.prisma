@@ -1,0 +1,414 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  locale       String   @default("tr")
+  unitSystem   String   @default("metric") // metric | imperial
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions          Session[]
+  profile           Profile?
+  targets           Targets?
+  foods             Food[]
+  recipes           Recipe[]
+  mealLogs          MealLog[]
+  aiAnalyses        AiAnalysis[]
+  waterLogs         WaterLog[]
+  workouts          Workout[]
+  measurements      BodyMeasurement[]
+  progressPhotos    ProgressPhoto[]
+  favorites         Favorite[]
+  reminders         Reminder[]
+  subscription      Subscription?
+  usageQuotas       UsageQuota[]
+  frequentFoods     FrequentFood[]
+  aiChatMessages    AiChatMessage[]
+  plannerDays       PlannerDay[]
+  fastingLogs       FastingLog[]
+  dailyNotes        DailyNote[]
+  pushEndpoints     PushEndpoint[]
+  stepsLogs         StepsLog[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Profile {
+  id                 String   @id @default(cuid())
+  userId             String   @unique
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sex                String? // male | female
+  birthDate          String? // YYYY-MM-DD
+  heightCm           Float?
+  weightKg           Float?
+  goalWeightKg       Float?
+  bodyFatPct         Float?
+  goal               String? // lose | maintain | gain | muscle | performance
+  weeklyRateKg       Float    @default(0.5)
+  activityLevel      String   @default("moderate") // sedentary | light | moderate | active | very_active
+  userType           String   @default("general") // general | athlete
+  dietPreference     String   @default("any") // any | vegetarian | vegan | gluten_free | halal
+  allergens          String   @default("") // comma separated
+  formula            String   @default("mifflin") // mifflin | katch
+  onboarded          Boolean  @default(false)
+  consentAt          DateTime?
+  trainingDayTarget  Boolean  @default(false) // athlete: different training day targets
+  carbCycling        Boolean  @default(false)
+  mealNames          String? // JSON {"breakfast":"...","lunch":"...","dinner":"...","snacks":"..."} custom meal labels
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model Targets {
+  id                 String   @id @default(cuid())
+  userId             String   @unique
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  calories           Int
+  protein            Int
+  carbs              Int
+  fat                Int
+  tdeeEstimate       Int      @default(0)
+  adaptiveEnabled    Boolean  @default(false)
+  // training day overrides (athlete)
+  trainCalories      Int?
+  trainProtein       Int?
+  trainCarbs         Int?
+  trainFat           Int?
+  // manual override flag
+  manuallyOverridden Boolean  @default(false)
+  lastAdaptiveAt     String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+// source: SEED | OFF | USDA | CUSTOM
+model Food {
+  id          String   @id @default(cuid())
+  name        String
+  nameEn      String?
+  brand       String?
+  source      String   @default("CUSTOM")
+  barcode     String?
+  category    String   @default("general") // turkish_cuisine | fruit | grain | meat | dairy | snack | drink | general
+  kcal100     Float
+  protein100  Float    @default(0)
+  carb100     Float    @default(0)
+  fat100      Float    @default(0)
+  fiber100    Float    @default(0)
+  sugar100    Float    @default(0)
+  sodium100   Float    @default(0) // mg
+  satFat100   Float    @default(0)
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  servings    Serving[]
+  isVerified  Boolean  @default(false)
+  deletedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  recipeItems  RecipeItem[]
+  logItems     MealLogItem[]
+  favorites    Favorite[]
+  frequentBy   FrequentFood[]
+
+  @@index([name])
+  @@index([userId])
+  @@index([barcode])
+  @@index([source])
+}
+
+model Serving {
+  id     String @id @default(cuid())
+  foodId String
+  food   Food   @relation(fields: [foodId], references: [id], onDelete: Cascade)
+  label  String
+  grams  Float
+}
+
+model Recipe {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  servings  Int      @default(1)
+  items     RecipeItem[]
+  deletedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model RecipeItem {
+  id       String @id @default(cuid())
+  recipeId String
+  recipe   Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  foodId   String
+  food     Food   @relation(fields: [foodId], references: [id], onDelete: Cascade)
+  grams    Float
+}
+
+// mealType: breakfast | lunch | dinner | snacks
+model MealLog {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date      String // YYYY-MM-DD
+  mealType  String
+  name      String?
+  isTemplate Boolean  @default(false)
+  items     MealLogItem[]
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([userId, date])
+}
+
+model MealLogItem {
+  id      String  @id @default(cuid())
+  logId   String
+  log     MealLog @relation(fields: [logId], references: [id], onDelete: Cascade)
+  foodId  String?
+  food    Food?   @relation(fields: [foodId], references: [id], onDelete: SetNull)
+  name    String
+  grams   Float
+  kcal    Float
+  protein Float
+  carbs   Float
+  fat     Float
+  fiber   Float   @default(0)
+  sugar   Float   @default(0)
+  sodium  Float   @default(0) // mg
+  satFat  Float   @default(0)
+  source  String  @default("manual") // manual | ai | barcode | recipe | quick_add
+}
+
+model AiAnalysis {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  imagePath    String?
+  rawResponse  String // JSON string
+  confidence   Float    @default(0)
+  corrected    Boolean  @default(false)
+  itemType     String   @default("photo") // photo | text
+  textInput    String?
+  logged       Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+}
+
+model WaterLog {
+  id       String   @id @default(cuid())
+  userId   String
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date     String // YYYY-MM-DD
+  ml       Int
+  createdAt DateTime @default(now())
+
+  @@index([userId, date])
+}
+
+model Workout {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date        String // YYYY-MM-DD
+  type        String // running | cycling | swimming | walking | strength | football | basketball | hiit | yoga | other
+  name        String?
+  durationMin Int
+  intensity   String   @default("moderate") // light | moderate | vigorous
+  met         Float
+  calories    Int
+  addedToTarget Boolean @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId, date])
+}
+
+model BodyMeasurement {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date       String
+  weightKg   Float?
+  bodyFatPct Float?
+  waistCm    Float?
+  armCm      Float?
+  chestCm    Float?
+  hipCm      Float?
+  note       String?
+  createdAt  DateTime @default(now())
+
+  @@index([userId, date])
+}
+
+model ProgressPhoto {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date      String
+  imagePath String
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@index([userId, date])
+}
+
+model Favorite {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  foodId    String
+  food      Food     @relation(fields: [foodId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, foodId])
+}
+
+model Reminder {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type         String // breakfast | lunch | dinner | water | weigh_in | workout
+  time         String // HH:mm
+  enabled      Boolean  @default(true)
+  lastSentDate String? // YYYY-MM-DD in app timezone — server-side push dedupe
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId])
+  @@index([enabled, time])
+}
+
+model PushEndpoint {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// Daily step totals — synced from Apple Health / Watch or manual entry
+model StepsLog {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date      String // YYYY-MM-DD (app timezone)
+  count     Int
+  source    String   @default("manual") // manual | apple_health
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, date])
+  @@index([userId, date])
+}
+
+model Subscription {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tier        String   @default("free") // free | premium
+  trialEndsAt DateTime?
+  renewsAt    DateTime?
+  cancelledAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model UsageQuota {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date      String
+  aiCount   Int      @default(0)
+  @@unique([userId, date])
+}
+
+model FrequentFood {
+  id      String @id @default(cuid())
+  userId  String
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  foodId  String
+  food    Food   @relation(fields: [foodId], references: [id], onDelete: Cascade)
+  count   Int    @default(1)
+  lastUsed DateTime @default(now())
+
+  @@unique([userId, foodId])
+}
+
+model AiChatMessage {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      String // user | assistant
+  content   String
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model PlannerDay {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date      String
+  planJson  String // meal suggestions JSON
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, date])
+}
+
+model FastingLog {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  startAt     DateTime
+  endAt       DateTime?
+  targetHours Int       @default(16)
+  note        String?
+
+  @@index([userId, startAt])
+}
+
+model DailyNote {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date      String // YYYY-MM-DD
+  mood      String? // great | good | okay | low | bad
+  text      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, date])
+  @@index([userId, date])
+}

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>KaloriAI — Çevrimdışı</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        margin: 0; min-height: 100dvh; display: grid; place-items: center;
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        background: #f7faf5; color: #1c2620;
+      }
+      @media (prefers-color-scheme: dark) {
+        body { background: #151a16; color: #e7ece8; }
+      }
+      .box { text-align: center; padding: 2rem; max-width: 26rem; }
+      .icon {
+        width: 72px; height: 72px; margin: 0 auto 1rem; border-radius: 20px;
+        background: linear-gradient(135deg, #22a06b, #84cc16);
+        display: grid; place-items: center; font-size: 2rem;
+      }
+      h1 { font-size: 1.25rem; margin: 0 0 .5rem; }
+      p { font-size: .9rem; opacity: .75; margin: 0 0 1.25rem; line-height: 1.5; }
+      button {
+        min-height: 44px; padding: 0 1.5rem; border-radius: 12px; border: 0;
+        background: #16a34a; color: #fff; font-size: .95rem; font-weight: 600; cursor: pointer;
+      }
+      button:hover { background: #15803d; }
+    </style>
+  </head>
+  <body>
+    <div class="box">
+      <div class="icon">🥑</div>
+      <h1>İnternet bağlantısı yok</h1>
+      <p>KaloriAI şu anda çevrimdışı. Bağlantın geri geldiğinde tekrar dene — kaydedilmiş verilerin güvende.</p>
+      <button onclick="location.reload()">Yeniden dene</button>
+    </div>
+  </body>
+</html>
