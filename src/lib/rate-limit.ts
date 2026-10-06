@@ -50,9 +50,18 @@ export function checkRateLimit(key: string, max: number, windowMs: number): Rate
   return { allowed: true, remaining: max - bucket.hits.length, retryAfterSec: 0 };
 }
 
-/** İstek istemci IP'si (gateway arkası: x-forwarded-for ilk değer) */
+/** İstek istemci IP'si (x-real-ip → XFF SON eleman → unknown; spoof-dayanıklı) */
 export function clientIp(req: Request): string {
+  // Güvenilir ters proxy (nginx) X-Real-IP'i $remote_addr ile ÜZERINE YAZAR — spoof edilemez.
+  const real = req.headers.get("x-real-ip");
+  if (real) return real.trim();
+  // XFF: yalnız SON elemana güven — güvenilir proxy gerçek istemci IP'sini sona EKLER
+  // ($proxy_add_x_forwarded_for). İlk eleman istemci tarafından spoof edilebilir
+  // (rate-limit bypass vektörü — sızma testi T29 bulgusu, düzeltildi).
   const fwd = req.headers.get("x-forwarded-for");
-  if (fwd) return fwd.split(",")[0].trim();
-  return req.headers.get("x-real-ip") ?? "unknown";
+  if (fwd) {
+    const parts = fwd.split(",").map((s) => s.trim()).filter(Boolean);
+    if (parts.length > 0) return parts[parts.length - 1];
+  }
+  return "unknown";
 }

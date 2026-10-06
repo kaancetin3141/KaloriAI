@@ -134,6 +134,7 @@ sudo -iu kaloriai ./deploy.sh        # pull → install → generate → db push
 - [ ] `ufw`: sadece 22/80/443 açık (`sudo ufw allow OpenSSH && sudo ufw allow 'Nginx Full' && sudo ufw enable`)
 - [ ] Günlük yedek cron çalışıyor (bir yedeği manuel test edin)
 - [ ] `journalctl -u kaloriai` temiz (Exception yok)
+- [ ] **Node doğrudan dışa açık DEĞİL**: yalnız nginx `127.0.0.1:3000`'e bağlanabilmeli; uygulama içi rate limiter `X-Real-IP`/`X-Forwarded-For` SON elemanından IP okur — nginx şablonundaki `proxy_set_header X-Real-IP $remote_addr` satırı aktif olmalı (aksi halde header spoof ile limitleme bypass edilebilir)
 
 ## 9. Bilinen Mimari Sınırlar (ölçekleme)
 
