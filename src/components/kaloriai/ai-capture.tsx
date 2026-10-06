@@ -183,7 +183,19 @@ export function AiCapture({
 
   return (
     <>
-      <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <Dialog
+        open={open}
+        onOpenChange={(v) => {
+          if (!v) {
+            onClose();
+            // Kapanınca yakalama state'ini sıfırla — aksi halde yeniden açılışta
+            // bayat/bozuk önizleme kalır ve akış sayfa yenilenene kadar takılır.
+            // (Editör state'ine dokunulmaz: analiz başarısında editör açık kalır.)
+            retake();
+            setCameraError(false);
+          }
+        }}
+      >
         <DialogContent className="max-h-[92vh] overflow-y-auto kai-scroll sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{dict.today.takePhoto}</DialogTitle>

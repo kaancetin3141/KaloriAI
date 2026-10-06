@@ -107,11 +107,17 @@ export async function POST(req: Request) {
 
     // compress + persist privately per user
     const buf = Buffer.from(await file.arrayBuffer());
-    const compressed = await sharp(buf)
-      .rotate()
-      .resize(1024, 1024, { fit: "inside", withoutEnlargement: true })
-      .jpeg({ quality: 82 })
-      .toBuffer();
+    // Bozuk/desteklenmeyen görsel verisi sharp'ta fırlar → 500 yerine 415 döndür
+    let compressed: Buffer;
+    try {
+      compressed = await sharp(buf)
+        .rotate()
+        .resize(1024, 1024, { fit: "inside", withoutEnlargement: true })
+        .jpeg({ quality: 82 })
+        .toBuffer();
+    } catch {
+      throw new ApiError("FILE_TYPE", 415);
+    }
     const dir = path.join(UPLOAD_ROOT, "ai", user.id);
     await fs.mkdir(dir, { recursive: true });
     const fileName = `${Date.now()}.jpg`;

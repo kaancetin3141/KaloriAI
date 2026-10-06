@@ -116,6 +116,12 @@ bun run dev                 # http://localhost:3000
 
 Sağlık kontrolü: `bun scripts/db-check.ts` (bütünlük + FK + yetim kayıt + veri sanity) · Sızma testi: `bash scripts/pen-test.sh` (çalışan sunucuya karşı 57 kontrol)
 
+## 🖥️ Ubuntu VDS'e Dağıtım
+
+Uygulama tek-süreç (Next.js standalone + SQLite + yerel upload) mimarisiyle VDS'e **uygundur**. Tam rehber: **[DEPLOYMENT.md](DEPLOYMENT.md)** — gereksinimler, `.env` (VAPID/CRON_SECRET), systemd servisi, nginx + Let's Encrypt, yedekleme cronu, güncelleme ve üretim kontrol listesi.
+
+Hazır şablonlar (`scripts/deploy/`): `kaloriai.service` · `nginx-kaloriai.conf` · `backup.sh` (SQLite WAL-safe) · `deploy.sh`
+
 ## 📄 Lisans
 
 Tüm hakları saklıdır © 2026 Kaan Çetin. Ticari kullanım için iletişime geçin.
