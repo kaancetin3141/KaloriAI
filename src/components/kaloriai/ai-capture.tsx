@@ -31,6 +31,37 @@ type ErrorKind = "quota" | "notfood" | "generic" | null;
 /** Local date → YYYY-MM-DD */
 const fmtDate = (d: Date = new Date()) => d.toLocaleDateString("en-CA");
 
+// Upload öncesi istemci taraflı küçültme: telefon fotoğrafları (3-8MB) 1600px JPEG'e
+// iner → daha hızlı AI turu, 413 (10MB) riski ortadan kalkar, mobil veri tasarrufu.
+const MAX_EDGE_PX = 1600;
+const MAX_RAW_BYTES = 2.5 * 1024 * 1024;
+
+async function downscaleImage(b: Blob): Promise<Blob> {
+  if (b.type === "image/jpeg" && b.size <= MAX_RAW_BYTES) return b; // zaten ideal
+  let bmp: ImageBitmap | null = null;
+  try {
+    bmp = await createImageBitmap(b, { imageOrientation: "from-image" });
+  } catch {
+    return b; // decode edilemedi → orijinali dene (sunucu 415 verirse net hata)
+  }
+  const scale = Math.min(1, MAX_EDGE_PX / Math.max(bmp.width, bmp.height));
+  const w = Math.max(1, Math.round(bmp.width * scale));
+  const h = Math.max(1, Math.round(bmp.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    bmp.close();
+    return b;
+  }
+  ctx.drawImage(bmp, 0, 0, w, h);
+  bmp.close();
+  const out = await new Promise<Blob | null>((res) => canvas.toBlob(res, "image/jpeg", 0.85));
+  if (!out || out.size >= b.size) return b;
+  return out;
+}
+
 export function AiCapture({
   open,
   onClose,
@@ -51,6 +82,10 @@ export function AiCapture({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState(false);
   const [errorKind, setErrorKind] = useState<ErrorKind>(null);
+  const [errMsg, setErrMsg] = useState<string | null>(null);
+  const [isIframe] = useState(
+    () => typeof window !== "undefined" && window.self !== window.top
+  );
   const [meal, setMeal] = useState<string>(
     defaultMealType && (DEFAULT_MEAL_TYPES as readonly string[]).includes(defaultMealType)
       ? defaultMealType
@@ -103,9 +138,15 @@ export function AiCapture({
 
   const applyBlob = useCallback(
     (b: Blob) => {
-      setPreview(b);
-      setBlob(b);
       setErrorKind(null);
+      setErrMsg(null);
+      setPreview(b); // hemen önizle (büyütme arkada sürer)
+      downscaleImage(b)
+        .then((small) => {
+          setBlob(small);
+          if (small !== b) setPreview(small);
+        })
+        .catch(() => setBlob(b));
     },
     [setPreview]
   );
@@ -144,6 +185,7 @@ export function AiCapture({
     setPreview(null);
     setBlob(null);
     setErrorKind(null);
+    setErrMsg(null);
   };
 
   const analyze = useMutation({
@@ -176,8 +218,17 @@ export function AiCapture({
           setErrorKind("notfood");
           return;
         }
+        setErrorKind("generic");
+        // Kullanıcının ne yapacağını bilmesi için kod bazlı net mesajlar:
+        if (err.code === "UNAUTHORIZED" || err.status === 401) setErrMsg(dict.ai.errAuth);
+        else if (err.code === "FILE_TOO_LARGE" || err.status === 413) setErrMsg(dict.ai.errSize);
+        else if (err.code === "FILE_TYPE" || err.status === 415) setErrMsg(dict.ai.errType);
+        else setErrMsg(null); // → genel mesaj
+        return;
       }
+      // fetch ağ hatası (TypeError: Failed to fetch vb.)
       setErrorKind("generic");
+      setErrMsg(dict.ai.errNetwork);
     },
   });
 
@@ -234,6 +285,11 @@ export function AiCapture({
                 <ImagePlus className="h-6 w-6" aria-hidden />
                 <span className="text-xs">{dict.today.takePhotoSub}</span>
               </button>
+              {cameraError && isIframe && (
+                <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-600 dark:text-amber-400">
+                  {dict.ai.camIframeHint}
+                </p>
+              )}
               <input
                 ref={fileRef}
                 type="file"
@@ -297,7 +353,7 @@ export function AiCapture({
                       ? dict.ai.quotaDone
                       : errorKind === "notfood"
                         ? dict.ai.notFood
-                        : dict.ai.failed}
+                        : (errMsg ?? dict.ai.failed)}
                   </p>
                   {errorKind === "quota" ? (
                     <Button
@@ -311,7 +367,12 @@ export function AiCapture({
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => setErrorKind(null)}
+                      onClick={() => {
+                        setErrorKind(null);
+                        setErrMsg(null);
+                        // Gerçek yeniden deneme: görsel hâlâ seçiliyse aynı görselle tekrar dene
+                        if (blob) analyze.mutate();
+                      }}
                       className="min-h-[44px] gap-1.5 sm:min-h-9 sm:self-start"
                     >
                       <RotateCcw className="h-3.5 w-3.5" aria-hidden />

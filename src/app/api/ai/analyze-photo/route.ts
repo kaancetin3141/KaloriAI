@@ -9,6 +9,9 @@ import sharp from "sharp";
 
 const UPLOAD_ROOT = path.join(process.cwd(), "upload");
 const FREE_DAILY_LIMIT = 5;
+/** Demo hesapları ortak oturumla kullanıldığından paylaşılan kota tek kullanıcıyı bloklamasın */
+const DEMO_DAILY_LIMIT = 40;
+const isDemoUser = (email?: string | null) => !!email?.endsWith("@demo.kaloriai.app");
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -55,13 +58,13 @@ Rules:
 {"items":[{"name":"...","grams":0,"kcal":0,"protein":0,"carbs":0,"fat":0,"fiber":0,"sugar":0,"sodium":0,"satFat":0,"confidence":0,"alternatives":["..."]}],"overallConfidence":0,"clarifyingQuestion":"..."}`;
 }
 
-async function checkQuota(userId: string): Promise<void> {
+async function checkQuota(userId: string, limit: number = FREE_DAILY_LIMIT): Promise<void> {
   const sub = await db.subscription.findUnique({ where: { userId } });
   const premium = sub?.tier === "premium" && (!sub.cancelledAt || (sub.renewsAt && sub.renewsAt > new Date()));
   if (premium) return;
   const date = localDateStr();
   const quota = await db.usageQuota.findUnique({ where: { userId_date: { userId, date } } });
-  if ((quota?.aiCount ?? 0) >= FREE_DAILY_LIMIT) throw new ApiError("QUOTA_EXCEEDED", 429);
+  if ((quota?.aiCount ?? 0) >= limit) throw new ApiError("QUOTA_EXCEEDED", 429);
 }
 
 async function bumpQuota(userId: string): Promise<void> {
@@ -103,7 +106,7 @@ export async function POST(req: Request) {
     if (!allowed.includes(file.type)) throw new ApiError("FILE_TYPE", 415);
     if (file.size > 10 * 1024 * 1024) throw new ApiError("FILE_TOO_LARGE", 413);
 
-    await checkQuota(user.id);
+    await checkQuota(user.id, isDemoUser(user.email) ? DEMO_DAILY_LIMIT : FREE_DAILY_LIMIT);
 
     // compress + persist privately per user
     const buf = Buffer.from(await file.arrayBuffer());
@@ -166,7 +169,7 @@ export async function POST(req: Request) {
       items: result.items,
       overallConfidence: result.overallConfidence,
       clarifyingQuestion: result.clarifyingQuestion ?? null,
-      quotaLeft: Math.max(0, FREE_DAILY_LIMIT - (quota?.aiCount ?? 1)),
+      quotaLeft: Math.max(0, (isDemoUser(user.email) ? DEMO_DAILY_LIMIT : FREE_DAILY_LIMIT) - (quota?.aiCount ?? 1)),
     });
   } catch (e) {
     return errorResponse(e);

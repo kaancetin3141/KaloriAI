@@ -4,7 +4,7 @@
  * - API requests: never cached (always network)
  * - Web Push (VAPID): background notifications + click-to-open
  */
-const CACHE = "kaloriai-v2";
+const CACHE = "kaloriai-v3";
 const PRECACHE = [
   "/",
   "/offline.html",

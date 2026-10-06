@@ -1,12 +1,39 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#22a06b"/>
-      <stop offset="1" stop-color="#84cc16"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#d8f3e5"/>
+    </linearGradient>
+    <linearGradient id="leaf" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#059669"/>
+      <stop offset="1" stop-color="#4ade80"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="0.35" stop-color="#ffffff" stop-opacity="0.25"/>
+      <stop offset="0.55" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.4"/>
     </linearGradient>
   </defs>
-  <rect x="4" y="4" width="56" height="56" rx="16" fill="url(#g)"/>
-  <path d="M32 14c-2 6-7 9-7 16a7 7 0 0 0 14 0c0-3-1.5-5-3-7-1 2-2 3-4 4 1-5 0-9 0-13z" fill="#fff" opacity="0.95"/>
-  <circle cx="44" cy="22" r="4" fill="#fff" opacity="0.9"/>
-  <circle cx="20" cy="44" r="3" fill="#fff" opacity="0.7"/>
+
+  <!-- cam panel zemini: beyaz → açık nane -->
+  <rect x="4" y="4" width="56" height="56" rx="16" fill="url(#bg)"/>
+  <rect x="4" y="4" width="56" height="56" rx="16" fill="#34d399" opacity="0.10"/>
+
+  <!-- çapraz cam parıltısı -->
+  <rect x="4" y="4" width="56" height="56" rx="16" fill="url(#sheen)"/>
+
+  <!-- cam kenar yüksekliği + dış yeşilimsi kontur -->
+  <rect x="5.2" y="5.2" width="53.6" height="53.6" rx="14.8" fill="none" stroke="#ffffff" stroke-opacity="0.95" stroke-width="1.6"/>
+  <rect x="4" y="4" width="56" height="56" rx="16" fill="none" stroke="#059669" stroke-opacity="0.20" stroke-width="1"/>
+
+  <!-- marka: alev/yaprak glyph (zümrüt gradyan) -->
+  <path d="M32 14c-2 6-7 9-7 16a7 7 0 0 0 14 0c0-3-1.5-5-3-7-1 2-2 3-4 4 1-5 0-9 0-13z" fill="url(#leaf)"/>
+  <path d="M32 16.5c-1.6 4.8-5.6 7.2-5.6 12.8a5.6 5.6 0 0 0 11.2 0c0-2.4-1.2-4-2.4-5.6-.8 1.6-1.6 2.4-3.2 3.2.8-4 0-7.2 0-10.4z" fill="#ffffff" opacity="0.18"/>
+
+  <!-- cam damlaları (frosted highlight) -->
+  <circle cx="44" cy="22" r="4.5" fill="#ffffff" fill-opacity="0.65" stroke="#ffffff" stroke-opacity="0.95" stroke-width="1"/>
+  <circle cx="42.6" cy="20.6" r="1.4" fill="#ffffff" fill-opacity="0.95"/>
+  <circle cx="20" cy="45" r="3.5" fill="#ffffff" fill-opacity="0.55" stroke="#ffffff" stroke-opacity="0.85" stroke-width="1"/>
+  <circle cx="46.5" cy="45.5" r="2.2" fill="#4ade80" fill-opacity="0.35" stroke="#ffffff" stroke-opacity="0.7" stroke-width="0.8"/>
 </svg>
