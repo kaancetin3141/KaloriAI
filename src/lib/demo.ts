@@ -14,6 +14,7 @@
 import { db } from "@/lib/db";
 import { hashPassword } from "@/lib/auth";
 import { calcTargets, workoutCalories, localDateStr } from "@/lib/calculations";
+import { ensureSeedFoods } from "@/lib/food-catalog";
 import type { Food, User } from "@prisma/client";
 
 export const DEMO_PASSWORD = "demo1234";
@@ -82,6 +83,13 @@ const jitter = (grams: number, rnd: () => number): number =>
 type FoodMap = Map<string, Food>;
 
 async function loadSeedFoods(): Promise<FoodMap> {
+  // Self-healing: katalog boşsa (ör. yeni VDS kurulumu) otomatik tohumla.
+  const count = await db.food.count({ where: { source: "SEED", deletedAt: null } });
+  if (count === 0) {
+    console.warn("[demo] SEED gıdası yok — katalog otomatik tohumlanıyor...");
+    const seeded = await ensureSeedFoods(db);
+    console.warn(`[demo] katalog tohumlandı: ${seeded.foods} gıda.`);
+  }
   const foods = await db.food.findMany({ where: { source: "SEED", deletedAt: null } });
   return new Map(foods.map((f) => [f.name.toLowerCase(), f]));
 }

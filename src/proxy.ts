@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 /**
- * API CSRF koruması — same-origin zorlaması.
+ * API CSRF koruması — same-origin zorlaması (Next.js 16 "proxy" konvansiyonu).
  *
  * Uygulama HTTPS'te SameSite=None çerez kullanır (iframe/CHIPS), bu yüzden
  * çerez tarayıcı tarafından çapraz-site isteklere de eklenir. Tarayıcılar
@@ -14,7 +14,7 @@ function normalizeHost(host: string): string {
   return host.toLowerCase().replace(/:(443|80)$/, "");
 }
 
-export function middleware(req: NextRequest) {
+export default function proxy(req: NextRequest) {
   const method = req.method.toUpperCase();
   const isMutating = method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE";
 
