@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { getCurrentUser, errorResponse } from "@/lib/auth";
+import { getCurrentUser, errorResponse, isPremium } from "@/lib/auth";
 
 /** Defensive parse of the Profile.mealNames JSON column */
 function parseMealNames(raw: string): Record<string, string> | null {
@@ -23,9 +23,7 @@ export async function GET() {
       db.profile.findUnique({ where: { userId: user.id } }),
       db.subscription.findUnique({ where: { userId: user.id } }),
     ]);
-    const premiumActive =
-      subscription?.tier === "premium" &&
-      (!subscription.cancelledAt || (subscription.renewsAt && subscription.renewsAt > new Date()));
+    const premiumActive = isPremium(subscription);
     return Response.json({
       user: {
         id: user.id,

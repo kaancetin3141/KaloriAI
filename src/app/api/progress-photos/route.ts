@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { localDateStr } from "@/lib/calculations";
-import { requireUser, errorResponse, ApiError } from "@/lib/auth";
+import { requireUser, errorResponse, ApiError, isPremium } from "@/lib/auth";
 import { promises as fs } from "fs";
 import path from "path";
 import sharp from "sharp";
@@ -29,10 +29,7 @@ export async function POST(req: Request) {
     const user = await requireUser();
     // premium gate
     const sub = await db.subscription.findUnique({ where: { userId: user.id } });
-    const premium =
-      sub?.tier === "premium" &&
-      (!sub.cancelledAt || (sub.renewsAt && sub.renewsAt > new Date()) || (sub.trialEndsAt && sub.trialEndsAt > new Date()));
-    if (!premium) throw new ApiError("PREMIUM_REQUIRED", 402);
+    if (!isPremium(sub)) throw new ApiError("PREMIUM_REQUIRED", 402);
 
     const form = await req.formData();
     const file = form.get("image");

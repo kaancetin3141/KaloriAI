@@ -254,9 +254,13 @@ export function ProgressScreen() {
   }
 
   const s = summary.summary;
-  const weightChangeRounded = isImperial
-    ? Math.round(kgToLb(s.weightChange) * 10) / 10
-    : Math.round(s.weightChange * 10) / 10;
+  // weightChange null → pencerede yeterli kilo ölçümü yok; "NaN" yerine çizgi göster
+  const weightChangeRounded =
+    s.weightChange == null
+      ? null
+      : isImperial
+        ? Math.round(kgToLb(s.weightChange) * 10) / 10
+        : Math.round(s.weightChange * 10) / 10;
 
   const statCards = [
     {
@@ -287,10 +291,10 @@ export function ProgressScreen() {
     },
     {
       label: dict.progress.weightChange,
-      value: `${weightChangeRounded > 0 ? "+" : ""}${weightChangeRounded}`,
+      value: weightChangeRounded == null ? "—" : `${weightChangeRounded > 0 ? "+" : ""}${weightChangeRounded}`,
       unit: isImperial ? dict.common.lb : dict.common.kg,
-      icon: weightChangeRounded <= 0 ? TrendingDown : TrendingUp,
-      tone: weightChangeRounded <= 0 ? "text-primary bg-primary/10" : "text-amber-500 bg-amber-500/10",
+      icon: (weightChangeRounded ?? 0) <= 0 ? TrendingDown : TrendingUp,
+      tone: (weightChangeRounded ?? 0) <= 0 ? "text-primary bg-primary/10" : "text-amber-500 bg-amber-500/10",
     },
     {
       label: dict.training.caloriesBurned,

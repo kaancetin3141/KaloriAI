@@ -364,7 +364,9 @@ export function TodayScreen() {
 
   const quickAdd = useMutation({
     mutationFn: (kcal: number) =>
-      api("/api/diary", { body: { date, mealType: "snacks", quickAddKcal: kcal } }),
+      api("/api/diary", {
+        body: { date, mealType: "snacks", quickAddKcal: kcal, name: dict.diary.quickAddName },
+      }),
     onSuccess: () => {
       toast({ title: dict.diary.saved });
       invalidateLogs();

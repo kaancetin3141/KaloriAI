@@ -34,9 +34,21 @@ export async function POST(req: Request) {
     const parsed = schema.safeParse(await req.json());
     if (!parsed.success) throw new ApiError("VALIDATION", 400);
     const date = parsed.data.date || localDateStr();
-    const m = await db.bodyMeasurement.create({
-      data: { userId: user.id, ...parsed.data, date },
-    });
+    // upsert on (userId, date): aynı güne ikinci POST çoğaltma değil GÜNCELLEME yapar;
+    // gönderilmeyen alanlar eski değeri korur (undefined → Prisma dokunmaz), explicit null temizler.
+    const existing = await db.bodyMeasurement.findFirst({ where: { userId: user.id, date } });
+    const m = existing
+      ? await db.bodyMeasurement.update({ where: { id: existing.id }, data: parsed.data })
+      : await db.bodyMeasurement
+          .create({ data: { userId: user.id, date, ...parsed.data } })
+          .catch(async (e: unknown) => {
+            // eşzamanlı çift create'te @@unique([userId, date]) devreye girer → güncellemeye düş
+            if ((e as { code?: string })?.code === "P2002") {
+              const dupe = await db.bodyMeasurement.findFirst({ where: { userId: user.id, date } });
+              if (dupe) return db.bodyMeasurement.update({ where: { id: dupe.id }, data: parsed.data });
+            }
+            throw e;
+          });
     // keep profile weight fresh
     if (parsed.data.weightKg != null) {
       await db.profile.update({ where: { userId: user.id }, data: { weightKg: parsed.data.weightKg } });

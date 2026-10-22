@@ -1,15 +1,12 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { requireUser, errorResponse, ApiError } from "@/lib/auth";
+import { requireUser, errorResponse, ApiError, isPremium } from "@/lib/auth";
 import { parseAppleHealthFile, latestPerDay } from "@/lib/apple-health";
 
 /** Premium gate — same policy as progress photos */
 async function requirePremium(userId: string): Promise<void> {
   const sub = await db.subscription.findUnique({ where: { userId } });
-  const premium =
-    sub?.tier === "premium" &&
-    (!sub.cancelledAt || (sub.renewsAt && sub.renewsAt > new Date()) || (sub.trialEndsAt && sub.trialEndsAt > new Date()));
-  if (!premium) throw new ApiError("PREMIUM_REQUIRED", 402);
+  if (!isPremium(sub)) throw new ApiError("PREMIUM_REQUIRED", 402);
 }
 
 const formSchema = z.object({ dryRun: z.enum(["0", "1"]).default("0") });

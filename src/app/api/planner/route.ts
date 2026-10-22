@@ -2,7 +2,7 @@ import { z } from "zod";
 import ZAI from "z-ai-web-dev-sdk";
 import { db } from "@/lib/db";
 import { localDateStr } from "@/lib/calculations";
-import { requireUser, errorResponse, ApiError } from "@/lib/auth";
+import { requireUser, errorResponse, ApiError, isPremium } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -95,12 +95,7 @@ function extractJson(content: string): unknown {
 
 async function requirePremium(userId: string) {
   const sub = await db.subscription.findUnique({ where: { userId } });
-  const premium =
-    sub?.tier === "premium" &&
-    (!sub.cancelledAt ||
-      (sub.renewsAt && sub.renewsAt > new Date()) ||
-      (sub.trialEndsAt && sub.trialEndsAt > new Date()));
-  if (!premium) throw new ApiError("PREMIUM_REQUIRED", 402);
+  if (!isPremium(sub)) throw new ApiError("PREMIUM_REQUIRED", 402);
 }
 
 /** POST /api/planner — premium: AI meal plan for a day or a whole week */

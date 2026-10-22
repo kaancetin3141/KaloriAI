@@ -58,6 +58,11 @@ type BarcodeDetectorCtor = new (opts: { formats: string[] }) => BarcodeDetectorL
 const macroLetters = (locale: string) =>
   locale === "tr" ? { p: "P", c: "K", f: "Y" } : { p: "P", c: "C", f: "F" };
 
+/** EN locale: prefer the food's English name when present, else fall back to the default name (display/init only) */
+function foodDisplayName(food: FoodItem, locale: string): string {
+  return locale === "en" && food.nameEn ? food.nameEn : food.name;
+}
+
 /** Localized meal label ("breakfast" → "Kahvaltı") */
 function useMealLabel(mealType: string): string {
   const { dict } = useAppStore();
@@ -111,7 +116,7 @@ function AddFoodPanel({
           items: [
             {
               foodId: food.id.startsWith("off_") ? undefined : food.id,
-              name: food.name,
+              name: foodDisplayName(food, locale),
               grams: g,
               kcal: scaled(food.kcal100),
               protein: scaled(food.protein100),
@@ -168,7 +173,7 @@ function AddFoodPanel({
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold">
-              {food.name}
+              {foodDisplayName(food, locale)}
               {food.brand ? <span className="font-normal text-muted-foreground"> · {food.brand}</span> : null}
             </p>
             <p className="text-xs text-muted-foreground tabular-nums">
@@ -269,11 +274,11 @@ function FoodRow({
         type="button"
         onClick={() => onSelect(food)}
         className="flex min-h-[44px] flex-1 items-center gap-3 rounded-xl p-3 text-left"
-        aria-label={`${food.name} — ${dict.common.edit}`}
+        aria-label={`${foodDisplayName(food, locale)} — ${dict.common.edit}`}
       >
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <span className="truncate text-sm font-medium">{food.name}</span>
+            <span className="truncate text-sm font-medium">{foodDisplayName(food, locale)}</span>
             {food.source === "OFF" && (
               <Badge
                 variant="outline"

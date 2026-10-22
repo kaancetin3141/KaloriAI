@@ -94,45 +94,53 @@ const itemSchema = z.object({
   source: z.enum(["manual", "ai", "barcode", "recipe", "quick_add"]).default("manual"),
 });
 
+/** POST /api/diary request body */
 const postSchema = z
   .object({
     date: z.string().regex(dateRe).default(todayStr()),
     mealType: z.enum(["breakfast", "lunch", "dinner", "snacks"]),
     items: z.array(itemSchema).max(30).optional(),
     aiAnalysisId: z.string().optional().nullable(),
+    /** Whether the user edited the AI result before logging (→ AiAnalysis.corrected) */
+    edited: z.boolean().optional().default(false),
+    /** Quick-add entry label from the client locale (fallback kept for API compat) */
+    name: z.string().trim().min(1).max(60).optional(),
     quickAddKcal: z.number().min(1).max(5000).optional(),
   })
   .refine((d) => d.quickAddKcal != null || (d.items && d.items.length > 0), {
     message: "ITEMS_REQUIRED",
   });
 
-/** POST /api/diary — add a meal (quick_add uses items=[{name:'Hızlı ekleme', kcal}]) */
+/** POST /api/diary — add a meal (quick_add uses the client-locale name, fallback kept for API compat) */
 export async function POST(req: Request) {
   try {
     const user = await requireUser();
     const parsed = postSchema.safeParse(await req.json());
     if (!parsed.success) throw new ApiError("VALIDATION", 400);
-    const { date, mealType, items, aiAnalysisId, quickAddKcal } = parsed.data;
+    const { date, mealType, items, aiAnalysisId, edited, name, quickAddKcal } = parsed.data;
 
+    const quickName = name || "Hızlı ekleme";
     const log = await db.mealLog.create({
       data: {
         userId: user.id,
         date,
         mealType,
-        name: quickAddKcal ? "Hızlı ekleme" : null,
+        name: quickAddKcal ? quickName : null,
         items: {
           create: quickAddKcal
-            ? [{ name: "Hızlı ekleme", grams: 0, kcal: quickAddKcal, protein: 0, carbs: 0, fat: 0, source: "quick_add" }]
+            ? [{ name: quickName, grams: 0, kcal: quickAddKcal, protein: 0, carbs: 0, fat: 0, source: "quick_add" }]
             : items,
         },
       },
       include: { items: true },
     });
 
-    // track frequent foods + mark ai analysis logged
+    // track frequent foods + mark ai analysis logged (corrected only when the user actually edited)
     const ops: Promise<unknown>[] = [];
     if (aiAnalysisId) {
-      ops.push(db.aiAnalysis.update({ where: { id: aiAnalysisId }, data: { logged: true, corrected: true } }).catch(() => {}));
+      ops.push(
+        db.aiAnalysis.update({ where: { id: aiAnalysisId }, data: { logged: true, corrected: edited === true } }).catch(() => {})
+      );
     }
     for (const item of items ?? []) {
       if (item.foodId && !item.foodId.startsWith("off_")) {

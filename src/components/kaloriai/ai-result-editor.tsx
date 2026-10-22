@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { AlertTriangle, Info, Loader2, Plus, Trash2 } from "lucide-react";
@@ -31,6 +31,8 @@ import {
 
 export interface AiEditorItem {
   name: string;
+  /** English display name from the food DB (used for EN locale initial values) */
+  nameEn?: string | null;
   grams: number;
   kcal: number;
   protein: number;
@@ -67,9 +69,12 @@ interface EditItem extends AiEditorItem {
   base: BaseVals;
 }
 
-function toEditItems(result: AiEditorResult): EditItem[] {
+function toEditItems(result: AiEditorResult, locale: string): EditItem[] {
   return result.items.map((it) => ({
     ...it,
+    // EN locale: prefer the English food name when available (display/init only —
+    // the user can still edit it; stored item keeps whatever the editor shows)
+    name: locale === "en" && it.nameEn ? it.nameEn : it.name,
     grams: it.grams > 0 ? it.grams : 100,
     sugar: it.sugar ?? 0,
     sodium: it.sodium ?? 0,
@@ -136,12 +141,40 @@ export function AiResultEditor({
   mealType: string;
   date: string;
 }) {
-  const { dict } = useAppStore();
+  const { dict, locale } = useAppStore();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   // Fresh mount per result (parents unmount when closed) → lazy init, no sync effect needed
-  const [items, setItems] = useState<EditItem[]>(() => toEditItems(result));
+  const [items, setItems] = useState<EditItem[]>(() => toEditItems(result, locale));
+  // Initial AI result snapshot — compared on save to derive the `edited` (corrected) flag
+  const initialRef = useRef<EditItem[]>(items);
   const [mt, setMt] = useState(mealType);
+
+  /** True when the user changed any item (name/grams/nutrients or add/remove) vs. the initial result */
+  const computeEdited = (): boolean => {
+    const init = initialRef.current.filter((i) => i.name.trim().length > 0);
+    const cur = items.filter((i) => i.name.trim().length > 0);
+    if (cur.length !== init.length) return true;
+    for (let i = 0; i < cur.length; i++) {
+      const a = cur[i];
+      const b = init[i];
+      if (
+        a.name.trim() !== b.name.trim() ||
+        a.grams !== b.grams ||
+        a.kcal !== b.kcal ||
+        a.protein !== b.protein ||
+        a.carbs !== b.carbs ||
+        a.fat !== b.fat ||
+        a.fiber !== b.fiber ||
+        a.sugar !== b.sugar ||
+        a.sodium !== b.sodium ||
+        a.satFat !== b.satFat
+      ) {
+        return true;
+      }
+    }
+    return false;
+  };
 
   const save = useMutation({
     mutationFn: () =>
@@ -149,6 +182,7 @@ export function AiResultEditor({
         body: {
           date,
           mealType: mt,
+          edited: computeEdited(),
           items: items
             .filter((i) => i.name.trim().length > 0)
             .map((i) => ({

@@ -60,6 +60,16 @@ export async function GET(req: Request) {
       previousTdee: targets?.tdeeEstimate || null,
     });
 
+    // weight-change yalnızca kilolu (weightKg dolu) ölçümler üzerinden hesaplanır:
+    // bel-girişli ölçüm penceresinde kilo alanı null olabilir → NaN yerine null dön.
+    const weighted = measurements.filter((m) => m.weightKg != null);
+    const firstW = weighted[0]?.weightKg ?? null;
+    const lastW = weighted[weighted.length - 1]?.weightKg ?? null;
+    const weightChange =
+      firstW != null && lastW != null && weighted.length >= 2 ? Math.round((lastW - firstW) * 100) / 100 : null;
+    const weightChangePct =
+      weightChange != null && firstW != null && firstW !== 0 ? Math.round((weightChange / firstW) * 1000) / 10 : null;
+
     return Response.json({
       byDate,
       targets,
@@ -70,10 +80,8 @@ export async function GET(req: Request) {
         streak,
         avgCalories,
         avgProtein,
-        weightChange:
-          measurements.length >= 2
-            ? Math.round((measurements[measurements.length - 1].weightKg! - measurements[0].weightKg!) * 100) / 100
-            : 0,
+        weightChange,
+        weightChangePct,
         workoutCount: workouts.length,
         totalBurned: workouts.reduce((a, w) => a + w.calories, 0),
       },

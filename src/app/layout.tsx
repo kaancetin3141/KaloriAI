@@ -6,12 +6,13 @@ import { Providers } from "@/components/kaloriai/providers";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
-  subsets: ["latin"],
+  // latin-ext covers Turkish glyphs (ğ/ş/İ/ı) so they don't fall back to system fonts
+  subsets: ["latin", "latin-ext"],
 });
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
-  subsets: ["latin"],
+  subsets: ["latin", "latin-ext"],
 });
 
 export const metadata: Metadata = {

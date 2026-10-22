@@ -88,6 +88,7 @@ import { useAppStore, PREMIUM_SKINS, type MealKey, type Skin } from "@/stores/ap
 import { useToast } from "@/hooks/use-toast";
 import { PaywallDialog } from "@/components/kaloriai/paywall-dialog";
 import { HealthMetricsCard } from "@/components/kaloriai/health-metrics-card";
+import { AiHistoryCard } from "@/components/kaloriai/ai-history-card";
 import { cn } from "@/lib/utils";
 
 interface ProfileFull {
@@ -978,6 +979,9 @@ export function ProfileScreen() {
 
       {/* Sağlık metrikleri — VKİ + ideal kilo aralığı */}
       <HealthMetricsCard />
+
+      {/* AI analiz geçmişi — son fotoğraf/yazı analizleri */}
+      <AiHistoryCard />
 
       {/* Settings */}
       <Card>

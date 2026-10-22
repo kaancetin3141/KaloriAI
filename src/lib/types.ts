@@ -166,7 +166,9 @@ export interface ProgressSummary {
     streak: number;
     avgCalories: number;
     avgProtein: number;
-    weightChange: number;
+    /** null = pencerede ≥2 kilo ölçümü yok (NaN yerine) */
+    weightChange: number | null;
+    weightChangePct: number | null;
     workoutCount: number;
     totalBurned: number;
   };

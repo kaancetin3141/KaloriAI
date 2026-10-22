@@ -51,7 +51,14 @@ export async function GET(req: Request) {
         sodium100: (n["sodium_100g"] ?? 0) * 1000,
         satFat100: n["saturated-fat_100g"] ?? 0,
         servings: p.serving_quantity
-          ? { create: { label: p.serving_size || "1 porsiyon", grams: p.serving_quantity } }
+          ? {
+              create: {
+                // dil-bağımsız etiket: OFF porsiyon bilgisi gram cinsinden → "X g"
+                // (Türkçe "1 porsiyon" önbelleğe sızmasın; gösterim etiketleri istemcide)
+                label: p.serving_size || `${Math.round(p.serving_quantity)} g`,
+                grams: p.serving_quantity,
+              },
+            }
           : undefined,
       },
       include: { servings: true },

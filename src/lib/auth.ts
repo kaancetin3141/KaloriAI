@@ -2,6 +2,7 @@ import { createHash, randomBytes, scryptSync, timingSafeEqual } from "crypto";
 import { cookies, headers } from "next/headers";
 import { ZodError } from "zod";
 import { db } from "@/lib/db";
+import type { Subscription } from "@prisma/client";
 
 const SESSION_COOKIE = "kaloriai_session";
 const SESSION_DAYS = 30;
@@ -112,4 +113,20 @@ export function errorResponse(e: unknown) {
   }
   console.error("[api]", e);
   return Response.json({ error: "SERVER_ERROR" }, { status: 500 });
+}
+
+/**
+ * Tek kaynak: premium üyelik hâlâ geçerli mi?
+ * - Abonelik iptal EDİLMEMİŞSE (cancelledAt null): deneme süresi (trialEndsAt) varsa
+ *   ve dolmuşsa premium DEĞİL; deneme yoksa veya devam ediyorsa premium.
+ * - Abonelik İPTAL EDİLMİŞSE: ödenmiş dönem bitene kadar (renewsAt > now) premium kalır.
+ * Böylece süresi dolmuş deneme → kalıcı premium olur (eski davranış), düzeltildi.
+ */
+export function isPremium(sub: Subscription | null): boolean {
+  if (!sub || sub.tier !== "premium") return false;
+  const now = new Date();
+  if (sub.cancelledAt) {
+    return sub.renewsAt != null && sub.renewsAt > now;
+  }
+  return sub.trialEndsAt == null || sub.trialEndsAt > now;
 }

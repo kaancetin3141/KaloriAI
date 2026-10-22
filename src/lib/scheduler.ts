@@ -17,6 +17,14 @@ const APP_TZ = process.env.APP_TZ ?? "Europe/Istanbul";
 /** Grace window in minutes: catches scans slightly late (GC pause, cold start) */
 const GRACE_MIN = 3;
 
+/**
+ * Quiet hours 22:00–08:00 in APP_TZ (Europe/Istanbul — product default locale is
+ * Turkish). Push notifications are never sent inside this night window; reminders
+ * due during it are skipped for that day (same policy as the client-side notifier).
+ */
+const QUIET_START_MIN = 22 * 60;
+const QUIET_END_MIN = 8 * 60;
+
 interface TzNow {
   date: string; // YYYY-MM-DD
   hhmm: string; // HH:mm
@@ -43,6 +51,10 @@ function tzNow(): TzNow {
 function reminderMinute(time: string): number {
   const [h, m] = time.split(":").map(Number);
   return h * 60 + m;
+}
+
+function isQuietHours(n: TzNow): boolean {
+  return n.minuteOfDay >= QUIET_START_MIN || n.minuteOfDay < QUIET_END_MIN;
 }
 
 interface ReminderMeta {
@@ -101,6 +113,11 @@ export interface ScanResult {
  */
 export async function runReminderScan(): Promise<ScanResult> {
   const now = tzNow();
+  // Quiet hours (22:00–08:00 APP_TZ): skip the whole scan — nothing is due-safe
+  // to send at night, and lastSentDate stays untouched so nothing is lost.
+  if (isQuietHours(now)) {
+    return { tz: APP_TZ, now: now.hhmm, date: now.date, checked: 0, sent: 0, marked: 0, pruned: 0 };
+  }
   const reminders = await db.reminder.findMany({
     where: { enabled: true, user: { pushEndpoints: { some: {} } } },
     select: {

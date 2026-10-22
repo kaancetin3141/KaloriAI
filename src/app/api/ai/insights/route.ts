@@ -20,7 +20,7 @@ export async function GET(req: Request) {
     for (let i = 6; i >= 0; i--) {
       days.push(localDaysAgoStr(i));
     }
-    const [logs, targets, workouts, weights] = await Promise.all([
+    const [logs, targets, workouts, weights, waterLogs] = await Promise.all([
       db.mealLog.findMany({
         where: { userId: user.id, date: { in: days }, deletedAt: null, isTemplate: false },
         include: { items: true },
@@ -31,13 +31,16 @@ export async function GET(req: Request) {
         where: { userId: user.id, date: { gte: days[0] } },
         orderBy: { date: "asc" },
       }),
+      db.waterLog.findMany({ where: { userId: user.id, date: { in: days } } }),
     ]);
 
     const perDay = days.map((d) => {
       const dayLogs = logs.filter((l) => l.date === d);
       const kcal = dayLogs.reduce((a, l) => a + l.items.reduce((s, i) => s + i.kcal, 0), 0);
       const protein = dayLogs.reduce((a, l) => a + l.items.reduce((s, i) => s + i.protein, 0), 0);
-      const water = 0;
+      // gerçek su verisi: günün toplamı (ml → litre); kayıt yoksa 0
+      const waterMl = waterLogs.filter((w) => w.date === d).reduce((a, w) => a + w.ml, 0);
+      const water = Math.round((waterMl / 1000) * 10) / 10;
       return { date: d, kcal: Math.round(kcal), protein: Math.round(protein), water };
     });
     const loggedDays = perDay.filter((d) => d.kcal > 200).length;
@@ -45,6 +48,15 @@ export async function GET(req: Request) {
     const proteinHits = targets ? perDay.filter((d) => d.protein >= targets.protein * 0.9).length : 0;
     const streak = calcStreak(new Set(logs.map((l) => l.date)), today);
     const workoutCount = workouts.length;
+
+    // kilo trendi: yalnız kilo alanı dolu ölçümler; yoksa "unknown" (null sızmasın)
+    const weighted = weights.filter((w) => w.weightKg != null);
+    const firstW = weighted[0]?.weightKg ?? null;
+    const lastW = weighted[weighted.length - 1]?.weightKg ?? null;
+    const weightTrend =
+      weighted.length >= 2 && firstW != null && lastW != null
+        ? `${firstW} -> ${lastW} kg`
+        : "unknown";
 
     const stats = {
       targetCalories: targets?.calories ?? 2000,
@@ -55,10 +67,7 @@ export async function GET(req: Request) {
       proteinHits,
       streak,
       workoutCount,
-      weightTrend:
-        weights.length >= 2
-          ? `${weights[0].weightKg} -> ${weights[weights.length - 1].weightKg} kg`
-          : null,
+      weightTrend,
     };
 
     const cacheKey = `${user.id}:${locale}:${days[6]}:${loggedDays}:${hitDays}:${proteinHits}`;

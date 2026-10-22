@@ -2,7 +2,7 @@ import { z } from "zod";
 import ZAI from "z-ai-web-dev-sdk";
 import { db } from "@/lib/db";
 import { localDateStr } from "@/lib/calculations";
-import { requireUser, errorResponse, ApiError } from "@/lib/auth";
+import { requireUser, errorResponse, ApiError, isPremium } from "@/lib/auth";
 import { assertPublicHttpUrl, fetchWithGuard, UrlBlockedError } from "@/lib/url-guard";
 
 export const runtime = "nodejs";
@@ -18,8 +18,7 @@ const schema = z.object({
 /* ---------------- quota (same policy as photo/text AI) ---------------- */
 async function checkQuota(userId: string): Promise<void> {
   const sub = await db.subscription.findUnique({ where: { userId } });
-  const premium = sub?.tier === "premium" && (!sub.cancelledAt || (sub.renewsAt && sub.renewsAt > new Date()));
-  if (premium) return;
+  if (isPremium(sub)) return;
   const date = localDateStr();
   const quota = await db.usageQuota.findUnique({ where: { userId_date: { userId, date } } });
   if ((quota?.aiCount ?? 0) >= FREE_DAILY_LIMIT) throw new ApiError("QUOTA_EXCEEDED", 429);
