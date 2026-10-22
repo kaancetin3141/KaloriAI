@@ -29,6 +29,7 @@ import {
   Zap,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { runAiJob } from "@/lib/ai-client";
 import { useAppStore, mealLabel } from "@/stores/app-store";
 import { useToast } from "@/hooks/use-toast";
 import { waterTargetMl } from "@/lib/calculations";
@@ -344,8 +345,9 @@ export function TodayScreen() {
   };
 
   const parseText = useMutation({
+    // Kısa POST + yoklama — uzun süren AI turu bağlantıyı meşgul etmez.
     mutationFn: (text: string) =>
-      api<AiTextResponse>("/api/ai/parse-text", { body: { text, locale } }),
+      runAiJob<AiTextResponse>("/api/ai/parse-text", { body: { text, locale } }),
     onSuccess: (res) => {
       setPendingResult({
         items: res.items,

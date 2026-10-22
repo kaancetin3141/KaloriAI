@@ -12,7 +12,7 @@ export class ApiError extends Error {
 
 export async function api<T>(
   path: string,
-  opts: { method?: string; body?: unknown; form?: FormData } = {}
+  opts: { method?: string; body?: unknown; form?: FormData; timeoutMs?: number } = {}
 ): Promise<T> {
   const init: RequestInit = { method: opts.method || (opts.body || opts.form ? "POST" : "GET") };
   if (opts.form) {
@@ -21,6 +21,10 @@ export async function api<T>(
     init.headers = { "Content-Type": "application/json" };
     init.body = JSON.stringify(opts.body);
   }
+  // İstek asla sonsuza kadar askıda kalmasın: taşınabilir timeout (AbortSignal.timeout
+  // tüm modern tarayıcılarda desteklenir). Süre dolarsa TimeoutError fırlar → çağıran
+  // taraf bunu ağ hatası olarak görür.
+  if (opts.timeoutMs) init.signal = AbortSignal.timeout(opts.timeoutMs);
   const res = await fetch(path, init);
   let data: unknown = null;
   try {

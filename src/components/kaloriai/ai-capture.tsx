@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Camera, ImagePlus, Loader2, RotateCcw, ScanFace, Sparkles } from "lucide-react";
-import { api, ApiError } from "@/lib/api";
+import { ApiError } from "@/lib/api";
+import { runAiJob } from "@/lib/ai-client";
 import { useAppStore } from "@/stores/app-store";
 import { DEFAULT_MEAL_TYPES } from "@/lib/calculations";
 import type { AiAnalyzeResponse } from "@/lib/types";
@@ -194,7 +195,9 @@ export function AiCapture({
       const fd = new FormData();
       fd.append("image", blob, "photo.jpg");
       fd.append("locale", locale);
-      return api<AiAnalyzeResponse>("/api/ai/analyze-photo", { form: fd });
+      // Kısa POST + yoklama: AI turu arka planda çalışır, bağlantı uzun süre
+      // meşgul kalmaz (ara proxy'ler uzun istekleri kestiği için).
+      return runAiJob<AiAnalyzeResponse>("/api/ai/analyze-photo", { form: fd });
     },
     onSuccess: (res) => {
       setEditorResult({
@@ -223,6 +226,8 @@ export function AiCapture({
         if (err.code === "UNAUTHORIZED" || err.status === 401) setErrMsg(dict.ai.errAuth);
         else if (err.code === "FILE_TOO_LARGE" || err.status === 413) setErrMsg(dict.ai.errSize);
         else if (err.code === "FILE_TYPE" || err.status === 415) setErrMsg(dict.ai.errType);
+        else if (err.code === "JOB_NOT_FOUND" || err.status === 404) setErrMsg(dict.ai.jobLost);
+        else if (err.code === "AI_TIMEOUT" || err.status === 504) setErrMsg(dict.ai.jobStuck);
         else setErrMsg(null); // → genel mesaj
         return;
       }

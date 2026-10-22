@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { Mic, Loader2, Square, Volume2 } from "lucide-react";
-import { api } from "@/lib/api";
+import { runAiJob } from "@/lib/ai-client";
 import { useAppStore } from "@/stores/app-store";
 import { useToast } from "@/hooks/use-toast";
 import type { Dictionary } from "@/lib/i18n";
@@ -157,7 +157,8 @@ function VoiceCaptureBody({ onClose }: { onClose: () => void }) {
     }
     setPhase("analyzing");
     try {
-      const res = await api<AiEditorResult & { ok: boolean }>("/api/ai/parse-text", {
+      // Kısa POST + yoklama — AI turu arka planda, bağlantı kısa ömürlü.
+      const res = await runAiJob<AiEditorResult & { ok: boolean }>("/api/ai/parse-text", {
         body: { text: t, locale },
       });
       if (!res.items?.length) {

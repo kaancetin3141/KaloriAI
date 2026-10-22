@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import { Loader2, Send, Sparkles } from "lucide-react";
-import { api } from "@/lib/api";
+import { runAiJob } from "@/lib/ai-client";
 import { useAppStore } from "@/stores/app-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -66,7 +66,8 @@ export function CoachDrawer() {
 
   const send = useMutation({
     mutationFn: async (message: string) => {
-      const res = await api<{ reply?: string; content?: string; message?: string }>(
+      // Kısa POST + yoklama — koç yanıtı arka planda üretilir.
+      const res = await runAiJob<{ reply?: string; content?: string; message?: string }>(
         "/api/ai/coach",
         { body: { message, locale } }
       );

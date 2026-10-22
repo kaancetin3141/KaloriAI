@@ -3,6 +3,7 @@ import ZAI from "z-ai-web-dev-sdk";
 import { db } from "@/lib/db";
 import { localDateStr } from "@/lib/calculations";
 import { requireUser, errorResponse, ApiError } from "@/lib/auth";
+import { createAiJob, getAiJob, startAiJob } from "@/lib/ai-jobs";
 import { promises as fs } from "fs";
 import path from "path";
 import sharp from "sharp";
@@ -93,10 +94,18 @@ function extractJson(text: string): unknown {
   throw new ApiError("AI_PARSE_FAILED", 502);
 }
 
+async function quotaLimitFor(userId: string, email: string): Promise<number> {
+  return isDemoUser(email) ? DEMO_DAILY_LIMIT : FREE_DAILY_LIMIT;
+}
+
+/**
+ * POST — hızlı aşama: doğrulama + sıkıştırma + kayıt (<1 sn), sonra iş arka
+ * plana atanır ve hemen jobId döner. AI turu (3-15 sn) bağlantıyı meşgul etmez;
+ * istemci GET?id= ile yoklama yapar. (Uzun istekler ara proxy'lerce kesiliyor.)
+ */
 export async function POST(req: Request) {
   try {
     const user = await requireUser();
-    const profile = await db.profile.findUnique({ where: { userId: user.id } });
 
     const form = await req.formData();
     const file = form.get("image");
@@ -106,7 +115,7 @@ export async function POST(req: Request) {
     if (!allowed.includes(file.type)) throw new ApiError("FILE_TYPE", 415);
     if (file.size > 10 * 1024 * 1024) throw new ApiError("FILE_TOO_LARGE", 413);
 
-    await checkQuota(user.id, isDemoUser(user.email) ? DEMO_DAILY_LIMIT : FREE_DAILY_LIMIT);
+    await checkQuota(user.id, await quotaLimitFor(user.id, user.email));
 
     // compress + persist privately per user
     const buf = Buffer.from(await file.arrayBuffer());
@@ -127,49 +136,83 @@ export async function POST(req: Request) {
     await fs.writeFile(path.join(dir, fileName), compressed);
     const imagePath = `ai/${user.id}/${fileName}`;
 
-    const zai = await ZAI.create();
     const base64 = compressed.toString("base64");
-    const completion = await zai.chat.completions.createVision({
-      model: "glm-4.5v",
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: buildPrompt(locale) },
-            { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64}` } },
-          ],
+    const jobId = createAiJob(user.id);
+
+    // Arka plan AI işi — sonucu iş kaydına yazar; ApiError kodları korunur.
+    startAiJob(jobId, async () => {
+      const zai = await ZAI.create();
+      const completion = await zai.chat.completions.createVision({
+        model: "glm-4.5v",
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: buildPrompt(locale) },
+              { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64}` } },
+            ],
+          },
+        ],
+        thinking: { type: "disabled" },
+      });
+      const content = completion.choices[0]?.message?.content ?? "";
+      if (!content) throw new ApiError("AI_FAILED", 502);
+
+      const raw = extractJson(content);
+      const parsedResult = responseSchema.safeParse(raw);
+      if (!parsedResult.success) throw new ApiError("AI_PARSE_FAILED", 502);
+      const result = parsedResult.data;
+      if (!result.items.length) throw new ApiError("NOT_FOOD", 422);
+
+      const analysis = await db.aiAnalysis.create({
+        data: {
+          userId: user.id,
+          imagePath,
+          rawResponse: JSON.stringify(result),
+          confidence: result.overallConfidence,
         },
-      ],
-      thinking: { type: "disabled" },
+      });
+      await bumpQuota(user.id);
+
+      return {
+        analysisId: analysis.id,
+        imageUrl: `/api/files/${imagePath}`,
+        items: result.items,
+        overallConfidence: result.overallConfidence,
+        clarifyingQuestion: result.clarifyingQuestion ?? null,
+      };
     });
-    const content = completion.choices[0]?.message?.content ?? "";
-    if (!content) throw new ApiError("AI_FAILED", 502);
 
-    const raw = extractJson(content);
-    const parsedResult = responseSchema.safeParse(raw);
-    if (!parsedResult.success) throw new ApiError("AI_PARSE_FAILED", 502);
-    const result = parsedResult.data;
-    if (!result.items.length) throw new ApiError("NOT_FOOD", 422);
+    return Response.json({ ok: true, jobId, analysisId: jobId, status: "pending" });
+  } catch (e) {
+    return errorResponse(e);
+  }
+}
 
-    const analysis = await db.aiAnalysis.create({
-      data: {
-        userId: user.id,
-        imagePath,
-        rawResponse: JSON.stringify(result),
-        confidence: result.overallConfidence,
-      },
+/** GET?id= — yoklama: pending / done (tam sonuç) / error (ApiError). */
+export async function GET(req: Request) {
+  try {
+    const user = await requireUser();
+    const id = new URL(req.url).searchParams.get("id");
+    if (!id) throw new ApiError("VALIDATION", 400);
+
+    const job = getAiJob(id, user.id);
+    if (!job) throw new ApiError("JOB_NOT_FOUND", 404);
+
+    if (job.status === "pending") return Response.json({ ok: true, status: "pending" });
+    if (job.status === "error") {
+      throw new ApiError(job.error ?? "AI_FAILED", job.errorStatus ?? 502);
+    }
+
+    const limit = await quotaLimitFor(user.id, user.email);
+    const quota = await db.usageQuota.findUnique({
+      where: { userId_date: { userId: user.id, date: localDateStr() } },
     });
-    await bumpQuota(user.id);
-    const quota = await db.usageQuota.findUnique({ where: { userId_date: { userId: user.id, date: localDateStr() } } });
-
     return Response.json({
       ok: true,
-      analysisId: analysis.id,
-      imageUrl: `/api/files/${imagePath}`,
-      items: result.items,
-      overallConfidence: result.overallConfidence,
-      clarifyingQuestion: result.clarifyingQuestion ?? null,
-      quotaLeft: Math.max(0, (isDemoUser(user.email) ? DEMO_DAILY_LIMIT : FREE_DAILY_LIMIT) - (quota?.aiCount ?? 1)),
+      status: "done",
+      ...(job.result as Record<string, unknown>),
+      quotaLeft: Math.max(0, limit - (quota?.aiCount ?? 0)),
     });
   } catch (e) {
     return errorResponse(e);

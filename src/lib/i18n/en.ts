@@ -319,6 +319,8 @@ export const en: Dictionary = {
     errSize: "Image is too large (10MB limit). Try taking a photo with the camera instead.",
     errType: "Unsupported file type — JPG/PNG images only.",
     errNetwork: "Could not connect — check your internet connection and try again.",
+    jobLost: "Analysis session not found (connection was refreshed) — please try again.",
+    jobStuck: "Analysis took longer than expected — please try again.",
     camIframeHint: "The preview panel may block camera access — try 'Choose photo' or open the app in a new tab.",
     lowConfQ: "Was oil used with the rice?",
     sources: "Detected items",

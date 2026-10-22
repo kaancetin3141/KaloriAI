@@ -317,6 +317,8 @@ export const tr = {
     errSize: "Görsel çok büyük (10MB sınırı). Kamerayla çekmeyi deneyin.",
     errType: "Desteklenmeyen dosya türü — yalnızca JPG/PNG görsel.",
     errNetwork: "Bağlantı kurulamadı — internet erişiminizi kontrol edip tekrar deneyin.",
+    jobLost: "Analiz oturumu bulunamadı (bağlantı yenilendi) — lütfen tekrar deneyin.",
+    jobStuck: "Analiz beklenenden uzun sürdü — lütfen tekrar deneyin.",
     camIframeHint: "Önizleme paneli kamera erişimini engelleyebilir — 'Fotoğraf seç' ile deneyin veya uygulamayı yeni sekmede açın.",
     lowConfQ: "Pilavla birlikte yağ kullanıldı mı?",
     sources: "Tespit edilenler",
