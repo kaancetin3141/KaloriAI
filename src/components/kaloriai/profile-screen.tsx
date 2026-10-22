@@ -643,6 +643,7 @@ export function ProfileScreen() {
   const [paywallOpen, setPaywallOpen] = useState(false);
   const [cancelConfirm, setCancelConfirm] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [sessionsConfirm, setSessionsConfirm] = useState(false);
   const [mealNamesOpen, setMealNamesOpen] = useState(false);
   const [remOverrides, setRemOverrides] = useState<Partial<Record<ReminderType, { time?: string; enabled?: boolean }>>>({});
   const [notifPerm, setNotifPerm] = useState<NotificationPermission | "unsupported">(() => {
@@ -826,6 +827,16 @@ export function ProfileScreen() {
     queryFn: () => api<{ reminders: Reminder[] }>("/api/reminders"),
   });
 
+  /* Aktif oturumlar — bu cihaz + diğer cihazlar (Task 5-c) */
+  const sessionsQ = useQuery<{
+    ok: boolean;
+    currentId: string | null;
+    sessions: { id: string; createdAt: string; expiresAt: string }[];
+  }>({
+    queryKey: ["sessions"],
+    queryFn: () => api("/api/sessions"),
+  });
+
   /* ---------- derived ---------- */
   const prof = profileQ.data?.profile;
   const sex: Sex = prof?.sex === "female" ? "female" : "male";
@@ -833,6 +844,17 @@ export function ProfileScreen() {
   const memberSince = profileQ.data?.user.createdAt
     ? new Date(profileQ.data.user.createdAt).toLocaleDateString(locale === "en" ? "en-US" : "tr-TR")
     : null;
+
+  /* Oturum listesi: süresi geçenleri de istemcide ele (API zaten filtreliyor, çifte güvence) */
+  const sessions = (sessionsQ.data?.sessions ?? []).filter((s) => new Date(s.expiresAt) > new Date());
+  const otherSessionCount = sessions.filter((s) => s.id !== sessionsQ.data?.currentId).length;
+  const sessionsDateFmt = new Intl.DateTimeFormat(locale === "en" ? "en-GB" : "tr-TR", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 
   const serverRems = remindersQ.data?.reminders ?? [];
   const remFor = (t: ReminderType) => {
@@ -927,6 +949,17 @@ export function ProfileScreen() {
       setDeleteConfirm(false);
       setUser(null);
       setTab("today");
+    },
+    onError: () => toast({ title: dict.common.error, variant: "destructive" }),
+  });
+
+  /* Diğer cihazlardaki oturumları kapat (mevcut oturum korunur) */
+  const revokeSessions = useMutation({
+    mutationFn: () => api<{ ok: boolean; revoked: number }>("/api/sessions", { method: "DELETE" }),
+    onSuccess: () => {
+      setSessionsConfirm(false);
+      void qc.invalidateQueries({ queryKey: ["sessions"] });
+      toast({ title: dict.profile.sessionsRevoked });
     },
     onError: () => toast({ title: dict.common.error, variant: "destructive" }),
   });
@@ -1600,6 +1633,81 @@ export function ProfileScreen() {
         </CardContent>
       </Card>
 
+      {/* Aktif oturumlar — açık cihazlar + uzaktan çıkış (Task 5-c) */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Smartphone className="h-4 w-4 text-primary" aria-hidden />
+            {dict.profile.sessionsTitle}
+          </CardTitle>
+          <CardDescription>{dict.profile.sessionsSub}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2.5">
+          <div
+            className="kai-scroll max-h-56 overflow-y-auto space-y-2"
+            role="list"
+            aria-label={dict.profile.sessionsTitle}
+          >
+            {sessionsQ.isLoading ? (
+              <>
+                <Skeleton className="h-14 w-full" aria-hidden />
+                <Skeleton className="h-14 w-full" aria-hidden />
+              </>
+            ) : sessions.length === 0 ? (
+              <p className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
+                {dict.common.emptyState}
+              </p>
+            ) : (
+              sessions.map((s) => {
+                const isCurrent = s.id === sessionsQ.data?.currentId;
+                return (
+                  <div
+                    key={s.id}
+                    role="listitem"
+                    className="flex items-center gap-3 rounded-lg border p-3"
+                  >
+                    <span
+                      className={cn(
+                        "h-9 w-9 rounded-lg flex items-center justify-center shrink-0",
+                        isCurrent ? "bg-primary/10" : "bg-accent",
+                      )}
+                      aria-hidden
+                    >
+                      <Smartphone
+                        className={cn("h-4 w-4", isCurrent ? "text-primary" : "text-accent-foreground")}
+                      />
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate tabular-nums">
+                        {sessionsDateFmt.format(new Date(s.createdAt))}
+                      </p>
+                    </div>
+                    {isCurrent && (
+                      <Badge variant="secondary" className="shrink-0">
+                        {dict.profile.sessionsCurrent}
+                      </Badge>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+          <Button
+            variant="outline"
+            className="w-full min-h-[44px] text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
+            disabled={revokeSessions.isPending || otherSessionCount === 0}
+            onClick={() => setSessionsConfirm(true)}
+          >
+            {revokeSessions.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            ) : (
+              <LogOut className="h-4 w-4" aria-hidden />
+            )}
+            {dict.profile.sessionsRevoke}
+          </Button>
+        </CardContent>
+      </Card>
+
       {/* Targets dialog — mounted only while open so fields seed from fresh data */}
       {targetsOpen && (
         <TargetsDialog
@@ -1689,6 +1797,30 @@ export function ProfileScreen() {
               }}
             >
               {dict.profile.deleteAccount}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Revoke other sessions confirm (Task 5-c) */}
+      <AlertDialog open={sessionsConfirm} onOpenChange={setSessionsConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{dict.profile.sessionsRevoke}</AlertDialogTitle>
+            <AlertDialogDescription>{dict.profile.sessionsSub}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="min-h-[44px]">{dict.common.cancel}</AlertDialogCancel>
+            <AlertDialogAction
+              className="min-h-[44px] bg-destructive text-white hover:bg-destructive/90"
+              disabled={revokeSessions.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                revokeSessions.mutate();
+              }}
+            >
+              {revokeSessions.isPending && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+              {dict.profile.sessionsRevoke}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

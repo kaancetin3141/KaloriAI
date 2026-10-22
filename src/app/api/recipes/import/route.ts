@@ -1,7 +1,7 @@
 import { z } from "zod";
 import ZAI from "z-ai-web-dev-sdk";
 import { db } from "@/lib/db";
-import { localDateStr } from "@/lib/calculations";
+import { appToday } from "@/lib/tz";
 import { requireUser, errorResponse, ApiError, isPremium } from "@/lib/auth";
 import { assertPublicHttpUrl, fetchWithGuard, UrlBlockedError } from "@/lib/url-guard";
 
@@ -19,13 +19,13 @@ const schema = z.object({
 async function checkQuota(userId: string): Promise<void> {
   const sub = await db.subscription.findUnique({ where: { userId } });
   if (isPremium(sub)) return;
-  const date = localDateStr();
+  const date = appToday();
   const quota = await db.usageQuota.findUnique({ where: { userId_date: { userId, date } } });
   if ((quota?.aiCount ?? 0) >= FREE_DAILY_LIMIT) throw new ApiError("QUOTA_EXCEEDED", 429);
 }
 
 async function bumpQuota(userId: string): Promise<void> {
-  const date = localDateStr();
+  const date = appToday();
   await db.usageQuota.upsert({
     where: { userId_date: { userId, date } },
     create: { userId, date, aiCount: 1 },

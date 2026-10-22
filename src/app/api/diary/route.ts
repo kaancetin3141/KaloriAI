@@ -1,19 +1,15 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireUser, errorResponse, ApiError } from "@/lib/auth";
-import { localDateStr } from "@/lib/calculations";
+import { appToday } from "@/lib/tz";
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/;
-
-function todayStr(): string {
-  return localDateStr();
-}
 
 /** GET /api/diary?date=YYYY-MM-DD — full day view */
 export async function GET(req: Request) {
   try {
     const user = await requireUser();
-    const date = new URL(req.url).searchParams.get("date") || todayStr();
+    const date = new URL(req.url).searchParams.get("date") || appToday();
     if (!dateRe.test(date)) throw new ApiError("VALIDATION", 400);
 
     const [logs, targets, water, workouts, profile, templates] = await Promise.all([
@@ -94,10 +90,13 @@ const itemSchema = z.object({
   source: z.enum(["manual", "ai", "barcode", "recipe", "quick_add"]).default("manual"),
 });
 
-/** POST /api/diary request body */
+/** POST /api/diary request body
+ * NOTE: date default is resolved at REQUEST time (appToday()), never via a
+ * zod .default(value) — that would be evaluated once at module load and go
+ * stale after midnight on a long-running server (logged to yesterday). */
 const postSchema = z
   .object({
-    date: z.string().regex(dateRe).default(todayStr()),
+    date: z.string().regex(dateRe).optional(),
     mealType: z.enum(["breakfast", "lunch", "dinner", "snacks"]),
     items: z.array(itemSchema).max(30).optional(),
     aiAnalysisId: z.string().optional().nullable(),
@@ -117,7 +116,8 @@ export async function POST(req: Request) {
     const user = await requireUser();
     const parsed = postSchema.safeParse(await req.json());
     if (!parsed.success) throw new ApiError("VALIDATION", 400);
-    const { date, mealType, items, aiAnalysisId, edited, name, quickAddKcal } = parsed.data;
+    const { mealType, items, aiAnalysisId, edited, name, quickAddKcal } = parsed.data;
+    const date = parsed.data.date ?? appToday(); // server default: APP_TZ today, per request
 
     const quickName = name || "Hızlı ekleme";
     const log = await db.mealLog.create({

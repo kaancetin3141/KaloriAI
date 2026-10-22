@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireUser, errorResponse, ApiError } from "@/lib/auth";
-import { localDateStr, calcTargets, waterTargetMl, type Sex, type Goal, type ActivityLevel, type UserType } from "@/lib/calculations";
+import { appToday } from "@/lib/tz";
+import { calcTargets, waterTargetMl, type Sex, type Goal, type ActivityLevel, type UserType } from "@/lib/calculations";
 
 export async function GET() {
   try {
@@ -155,7 +156,7 @@ export async function PATCH(req: Request) {
           });
           if (weightKg != null) {
             await db.bodyMeasurement.create({
-              data: { userId: user.id, date: localDateStr(), weightKg },
+              data: { userId: user.id, date: appToday(), weightKg },
             });
           }
         }

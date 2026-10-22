@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireUser, errorResponse, ApiError } from "@/lib/auth";
-import { localDateStr, localDaysAgoStr, workoutCalories, metForIntensity } from "@/lib/calculations";
+import { appToday, appDaysAgoStr } from "@/lib/tz";
+import { workoutCalories, metForIntensity } from "@/lib/calculations";
 
 const BASE_METS: Record<string, number> = {
   running: 9.8,
@@ -30,10 +31,10 @@ export async function GET(req: Request) {
   try {
     const user = await requireUser();
     const url = new URL(req.url);
-    const date = url.searchParams.get("date") || localDateStr();
+    const date = url.searchParams.get("date") || appToday();
     const range = url.searchParams.get("range");
     const where = range === "week"
-      ? { userId: user.id, date: { gte: localDaysAgoStr(6) } }
+      ? { userId: user.id, date: { gte: appDaysAgoStr(6) } }
       : { userId: user.id, date };
     const workouts = await db.workout.findMany({ where, orderBy: { createdAt: "desc" }, take: 100 });
     return Response.json({ workouts });
@@ -57,7 +58,7 @@ export async function POST(req: Request) {
     const workout = await db.workout.create({
       data: {
         userId: user.id,
-        date: parsed.data.date || localDateStr(),
+        date: parsed.data.date || appToday(),
         type: parsed.data.type,
         name: parsed.data.name ?? null,
         durationMin: parsed.data.durationMin,

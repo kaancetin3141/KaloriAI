@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { localDateStr } from "@/lib/calculations";
+import { appToday, addDaysIso } from "@/lib/tz";
 import { requireUser, errorResponse, ApiError } from "@/lib/auth";
 
 export const runtime = "nodejs";
@@ -11,16 +11,12 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const dateParam = url.searchParams.get("date");
     if (dateParam && !/^\d{4}-\d{2}-\d{2}$/.test(dateParam)) throw new ApiError("VALIDATION", 400);
-    const endDate = dateParam ?? localDateStr();
-    const start = new Date(`${endDate}T12:00:00`);
-    start.setDate(start.getDate() - 6);
-    const startDate = start.toLocaleDateString("en-CA");
+    const endDate = dateParam ?? appToday();
+    // deterministic window on date STRINGS (UTC-anchored) — host machine
+    // timezone must never influence which 7 calendar days are reported
+    const startDate = addDaysIso(endDate, -6);
     const dates: string[] = [];
-    const cursor = new Date(start);
-    for (let i = 0; i < 7; i++) {
-      dates.push(cursor.toLocaleDateString("en-CA"));
-      cursor.setDate(cursor.getDate() + 1);
-    }
+    for (let i = 6; i >= 0; i--) dates.push(addDaysIso(endDate, -i));
 
     const [profile, targets, logs, water, workouts, measurements, dailyNote] = await Promise.all([
       db.profile.findUnique({ where: { userId: user.id } }),

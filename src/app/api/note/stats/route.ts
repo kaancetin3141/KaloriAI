@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { localDateStr } from "@/lib/calculations";
+import { appDaysAgoStr } from "@/lib/tz";
 import { requireUser, errorResponse } from "@/lib/auth";
 
 export const runtime = "nodejs";
@@ -18,9 +18,9 @@ export async function GET(req: Request) {
       ? Math.min(Math.max(Math.trunc(daysRaw), 7), 90)
       : 30;
 
-    const since = new Date();
-    since.setDate(since.getDate() - (days - 1));
-    const sinceStr = localDateStr(since);
+    // deterministic APP_TZ window (machine-local setDate math is TZ-fragile:
+    // a host-DST shift can flip the Istanbul calendar date near midnight)
+    const sinceStr = appDaysAgoStr(days - 1);
 
     const notes = await db.dailyNote.findMany({
       where: { userId: user.id, date: { gte: sinceStr }, mood: { not: null } },

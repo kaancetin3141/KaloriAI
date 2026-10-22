@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { motion } from "framer-motion";
 import {
   ResponsiveContainer,
   BarChart,
@@ -30,6 +31,9 @@ import {
   FileJson,
   Loader2,
   Camera,
+  Share2,
+  Trophy,
+  X,
   Sparkles,
   AlertTriangle,
   Scale,
@@ -63,9 +67,13 @@ import { ProjectionCard } from "@/components/kaloriai/projection-card";
 import { StreakHeatmap } from "@/components/kaloriai/streak-heatmap";
 import { MoodCard } from "@/components/kaloriai/mood-card";
 import { ReportButton } from "@/components/kaloriai/report-view";
+import { ShareCardDialog } from "@/components/kaloriai/share-card";
 
 const fmtDate = (d = new Date()) => d.toLocaleDateString("en-CA");
 const dateTick = (d: string) => (typeof d === "string" ? d.slice(5).replace("-", "/") : d);
+
+/** Hedef kutlaması tekrar tetiklenmesin: kutlanan hedef kilo burada saklanır (hedef değişirse yeniden kurulur) */
+const GOAL_CELEBRATED_KEY = "kaloriai_goalCelebrated";
 
 interface ProgressPhoto {
   id: string;
@@ -94,6 +102,42 @@ const emptyMeas = (): MeasFields => ({
   hipCm: "",
 });
 
+/* ---------- hedef kutlaması konfetisi (hafif, ek paket yok) ---------- */
+const CONFETTI_COLORS = ["#4ade80", "#fbbf24", "#2dd4bf", "#a7f3d0", "#f97316", "#facc15", "#86efac"];
+
+function GoalConfetti() {
+  // Rastgele transformlar mount başına bir kez üretilir (useMemo → yeniden render'da sabit)
+  const dots = useMemo(
+    () =>
+      Array.from({ length: 24 }, (_, i) => ({
+        id: i,
+        leftPct: Math.random() * 96,
+        endY: 200 + Math.random() * 150,
+        drift: -70 + Math.random() * 140,
+        rot: (Math.random() * 2 - 1) * 300,
+        size: 6 + Math.random() * 7,
+        delay: Math.random() * 0.4,
+        dur: 1.6 + Math.random() * 1.3,
+        color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+      })),
+    []
+  );
+  return (
+    <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-2xl" aria-hidden>
+      {dots.map((d) => (
+        <motion.span
+          key={d.id}
+          className="absolute top-0 rounded-[2px]"
+          style={{ left: `${d.leftPct}%`, width: d.size, height: d.size * 0.62, backgroundColor: d.color }}
+          initial={{ y: -16, x: 0, opacity: 0, rotate: 0 }}
+          animate={{ y: d.endY, x: d.drift, opacity: [0, 1, 1, 0], rotate: d.rot }}
+          transition={{ duration: d.dur, delay: d.delay, ease: "easeIn", times: [0, 0.12, 0.75, 1] }}
+        />
+      ))}
+    </div>
+  );
+}
+
 export function ProgressScreen() {
   const dict = useAppStore((s) => s.dict);
   const locale = useAppStore((s) => s.locale);
@@ -106,6 +150,8 @@ export function ProgressScreen() {
   const [measOpen, setMeasOpen] = useState(false);
   const [measForm, setMeasForm] = useState<MeasFields>(emptyMeas);
   const [paywallOpen, setPaywallOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [celebrationDismissed, setCelebrationDismissed] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   /* ---------- queries ---------- */
@@ -161,6 +207,56 @@ export function ProgressScreen() {
         hip: m.hipCm != null ? cv(m.hipCm) : null,
       }));
   }, [summary, isImperial]);
+
+  /* ---------- hedef kutlaması ---------- */
+  // Son tartılma + hedef kilo: yalnız ikisi de gerçek sayı olduğunda değerlendirilir (NaN/null asla)
+  const latestWeightKg = useMemo(() => {
+    const ms = (summary?.measurements ?? []).filter((m) => m.weightKg != null && Number.isFinite(m.weightKg));
+    return ms.length > 0 ? (ms[ms.length - 1].weightKg as number) : null;
+  }, [summary]);
+  const goalWeightKg = profileQ.data?.profile?.goalWeightKg ?? null;
+  const profileWeightKg = profileQ.data?.profile?.weightKg ?? null;
+  const goalType = profileQ.data?.profile?.goal ?? null;
+
+  // Yön: mümkünse profilden veriye dayalı (başlangıç kilosu ↔ hedef kilo),
+  // yoksa hedef tipinden; "muscle"/"performance" gibi varyasyonlar da güvenli ele alınır.
+  const goalDirection = useMemo<"lose" | "gain" | "maintain">(() => {
+    if (goalType === "maintain") return "maintain";
+    if (goalWeightKg != null && profileWeightKg != null && goalWeightKg !== profileWeightKg) {
+      return goalWeightKg > profileWeightKg ? "gain" : "lose";
+    }
+    if (goalType === "gain" || goalType === "muscle") return "gain";
+    if (goalType === "lose") return "lose";
+    return "maintain"; // performance / bilinmeyen → yalnız ±0,2 kg penceresi
+  }, [goalType, goalWeightKg, profileWeightKg]);
+
+  const goalReached = useMemo(() => {
+    if (latestWeightKg == null || goalWeightKg == null) return false;
+    if (!Number.isFinite(latestWeightKg) || !Number.isFinite(goalWeightKg)) return false;
+    const TOL = 0.2; // 0,2 kg tolerans ("hedefe ulaşıldı" sayılır)
+    if (goalDirection === "gain") return latestWeightKg >= goalWeightKg - TOL;
+    if (goalDirection === "maintain") return Math.abs(latestWeightKg - goalWeightKg) <= TOL;
+    return latestWeightKg <= goalWeightKg + TOL; // lose
+  }, [latestWeightKg, goalWeightKg, goalDirection]);
+
+  // Daha önce kutlandı mı? (localStorage = kutlanan hedef kilo; hedef değişirse yeniden kurulur)
+  const celebratedBefore =
+    goalReached &&
+    goalWeightKg != null &&
+    typeof window !== "undefined" &&
+    window.localStorage.getItem(GOAL_CELEBRATED_KEY) === String(goalWeightKg);
+  const showCelebration = goalReached && !celebratedBefore && !celebrationDismissed;
+
+  // Kutlama gösterildiğinde işaretle (tek seferlik; setState yok — saf kalıcılık yazımı)
+  useEffect(() => {
+    if (showCelebration && goalWeightKg != null) {
+      try {
+        window.localStorage.setItem(GOAL_CELEBRATED_KEY, String(goalWeightKg));
+      } catch {
+        /* localStorage kapalıysa sessizce geç — kutlama yine de görünür */
+      }
+    }
+  }, [showCelebration, goalWeightKg]);
 
   /* ---------- mutations ---------- */
   const addMeas = useMutation({
@@ -381,16 +477,59 @@ export function ProgressScreen() {
 
   return (
     <div className="space-y-5 pb-4">
+      {/* Hedef kutlaması — tek seferlik, kapatılabilir */}
+      {showCelebration && (
+        <motion.section
+          initial={{ opacity: 0, y: -12, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ type: "spring", stiffness: 260, damping: 22 }}
+          className="relative overflow-hidden rounded-2xl border border-amber-500/40 bg-gradient-to-r from-amber-500/15 via-primary/10 to-emerald-500/15 p-4 sm:p-5"
+          aria-live="polite"
+        >
+          <GoalConfetti />
+          <div className="relative flex items-start gap-3">
+            <div className="h-11 w-11 shrink-0 rounded-xl bg-amber-500/20 flex items-center justify-center" aria-hidden>
+              <Trophy className="h-6 w-6 text-amber-500" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-base font-bold">{dict.progress.goalReached}</p>
+              <p className="text-sm text-muted-foreground">{dict.progress.goalReachedSub}</p>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-11 w-11 shrink-0 text-muted-foreground hover:text-foreground"
+              onClick={() => setCelebrationDismissed(true)}
+              aria-label={dict.common.close}
+            >
+              <X className="h-4 w-4" aria-hidden />
+            </Button>
+          </div>
+        </motion.section>
+      )}
+
       {/* Header + range */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-bold">{dict.progress.title}</h1>
-        <Tabs value={String(days)} onValueChange={(v) => setDays(Number(v) as 7 | 30 | 90)}>
-          <TabsList aria-label={dict.progress.title}>
-            <TabsTrigger value="7" className="min-h-[36px] px-4">{dict.progress.rangeWeek}</TabsTrigger>
-            <TabsTrigger value="30" className="min-h-[36px] px-4">{dict.progress.rangeMonth}</TabsTrigger>
-            <TabsTrigger value="90" className="min-h-[36px] px-4">{dict.progress.range90}</TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="min-h-[36px]"
+            onClick={() => setShareOpen(true)}
+            aria-label={dict.shareCard.share}
+          >
+            <Share2 className="h-4 w-4" aria-hidden />
+            {dict.shareCard.share}
+          </Button>
+          <Tabs value={String(days)} onValueChange={(v) => setDays(Number(v) as 7 | 30 | 90)}>
+            <TabsList aria-label={dict.progress.title}>
+              <TabsTrigger value="7" className="min-h-[36px] px-4">{dict.progress.rangeWeek}</TabsTrigger>
+              <TabsTrigger value="30" className="min-h-[36px] px-4">{dict.progress.rangeMonth}</TabsTrigger>
+              <TabsTrigger value="90" className="min-h-[36px] px-4">{dict.progress.range90}</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
       </div>
 
       {/* Summary stat cards */}
@@ -898,6 +1037,9 @@ export function ProgressScreen() {
       </Dialog>
 
       <PaywallDialog open={paywallOpen} onClose={() => setPaywallOpen(false)} />
+
+      {/* Haftalık paylaşım kartı — mevcut summary verisiyle canvas PNG */}
+      <ShareCardDialog open={shareOpen} onOpenChange={setShareOpen} summary={summary} />
     </div>
   );
 }

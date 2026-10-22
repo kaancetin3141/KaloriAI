@@ -1,7 +1,7 @@
 import { z } from "zod";
 import ZAI from "z-ai-web-dev-sdk";
 import { db } from "@/lib/db";
-import { localDateStr } from "@/lib/calculations";
+import { appToday } from "@/lib/tz";
 import { requireUser, errorResponse, ApiError, isPremium } from "@/lib/auth";
 import { createAiJob, getAiJob, startAiJob } from "@/lib/ai-jobs";
 import { promises as fs } from "fs";
@@ -62,13 +62,13 @@ Rules:
 async function checkQuota(userId: string, limit: number = FREE_DAILY_LIMIT): Promise<void> {
   const sub = await db.subscription.findUnique({ where: { userId } });
   if (isPremium(sub)) return;
-  const date = localDateStr();
+  const date = appToday();
   const quota = await db.usageQuota.findUnique({ where: { userId_date: { userId, date } } });
   if ((quota?.aiCount ?? 0) >= limit) throw new ApiError("QUOTA_EXCEEDED", 429);
 }
 
 async function bumpQuota(userId: string): Promise<void> {
-  const date = localDateStr();
+  const date = appToday();
   await db.usageQuota.upsert({
     where: { userId_date: { userId, date } },
     create: { userId, date, aiCount: 1 },
@@ -205,7 +205,7 @@ export async function GET(req: Request) {
 
     const limit = await quotaLimitFor(user.id, user.email);
     const quota = await db.usageQuota.findUnique({
-      where: { userId_date: { userId: user.id, date: localDateStr() } },
+      where: { userId_date: { userId: user.id, date: appToday() } },
     });
     return Response.json({
       ok: true,

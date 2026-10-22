@@ -8,12 +8,21 @@ import {
   ImageOff,
   Loader2,
   Quote,
+  Repeat,
   Sparkles,
   Trash2,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,7 +34,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { api } from "@/lib/api";
-import { useAppStore } from "@/stores/app-store";
+import { DEFAULT_MEAL_TYPES, type MealType } from "@/lib/calculations";
+import { useAppStore, mealLabel } from "@/stores/app-store";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
@@ -69,6 +79,7 @@ function confidenceTone(c: number): string {
 export function AiHistoryCard() {
   const dict = useAppStore((s) => s.dict);
   const locale = useAppStore((s) => s.locale);
+  const mealNames = useAppStore((s) => s.mealNames);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -114,6 +125,42 @@ export function AiHistoryCard() {
       toast({ description: dict.ai.historyDeleted });
       setDeletedIds((prev) => new Set(prev).add(id));
       setPendingDelete(null);
+      queryClient.invalidateQueries({ queryKey: ["ai-history"] });
+    },
+    onError: () => toast({ description: dict.common.error, variant: "destructive" }),
+  });
+
+  // Yeniden ekle — geçmiş analizi bugüne (kullanıcının seçtiği öğüne) deftere yazar.
+  // Geçmiş özetinde yalnızca name/grams/kcal saklandığı için makrolar 0 gönderilir,
+  // kaynak "ai" işaretlenir; aiAnalysisId ile analiz "logged" olarak işaretlenir.
+  const relog = useMutation({
+    mutationFn: ({ item, mealType }: { item: HistoryItem; mealType: MealType }) =>
+      api<{ ok: boolean; log: unknown }>("/api/diary", {
+        body: {
+          date: new Date().toLocaleDateString("en-CA"),
+          mealType,
+          items: item.items.map((i) => ({
+            name: i.name,
+            grams: i.grams,
+            kcal: i.kcal,
+            protein: 0,
+            carbs: 0,
+            fat: 0,
+            fiber: 0,
+            sugar: 0,
+            sodium: 0,
+            satFat: 0,
+            source: "ai",
+          })),
+          aiAnalysisId: item.id,
+          edited: false,
+        },
+      }),
+    onSuccess: () => {
+      toast({ description: dict.ai.historyRelogDone });
+      // Halka/hedef güncellensin + döşemedeki logged işareti tazelensin
+      queryClient.invalidateQueries({ queryKey: ["diary"] });
+      queryClient.invalidateQueries({ queryKey: ["summary"] });
       queryClient.invalidateQueries({ queryKey: ["ai-history"] });
     },
     onError: () => toast({ description: dict.common.error, variant: "destructive" }),
@@ -220,6 +267,35 @@ export function AiHistoryCard() {
                         />
                       )}
                       <span className="flex-1" aria-hidden />
+                      {it.items.length > 0 && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="-mr-1 h-11 w-11 text-muted-foreground/70 hover:text-primary"
+                              aria-label={`${dict.ai.historyRelog}: ${label}`}
+                              title={dict.ai.historyRelog}
+                              disabled={relog.isPending && relog.variables?.item.id === it.id}
+                            >
+                              {relog.isPending && relog.variables?.item.id === it.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                              ) : (
+                                <Repeat className="h-3.5 w-3.5" aria-hidden />
+                              )}
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="min-w-40">
+                            <DropdownMenuLabel>{dict.ai.historyRelog}</DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            {DEFAULT_MEAL_TYPES.map((mt) => (
+                              <DropdownMenuItem key={mt} className="min-h-[44px]" onClick={() => relog.mutate({ item: it, mealType: mt })}>
+                                {mealLabel(dict, mealNames, mt)}
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
                       <Button
                         variant="ghost"
                         size="icon"

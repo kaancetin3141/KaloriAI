@@ -145,3 +145,56 @@ sudo -iu kaloriai ./deploy.sh        # pull → install → generate → db push
 | Upload disk | Yerel disk | Çoklu replikada S3/R2 benzeri object storage gerekir |
 | Push zamanlayıcı | Süreç içi (her dk) | Tek instance varsayımı — birden fazla instance çalıştırmayın |
 | Abonelik | Simülasyon | Gerçek ödeme sağlayıcısı (RevenueCat/IAP/Stripe) bağlanana kadar monetizasyona hazır DEĞİL |
+
+---
+
+## 10. Yedekleme — `scripts/backup-db.sh` (hafif, yalnız DB — Task 5-c)
+
+Bölüm 6'daki tam yedeğin (DB + upload/ + .env) yanına **yalnız veritabanı** için
+hafif bir günlük yedek betiği eklendi: `scripts/backup-db.sh`.
+
+Özellikler:
+
+- `set -euo pipefail`; DB yolunu `.env` → `DATABASE_URL=file:...` içinden çözer
+  (varsayılan `db/custom.db`), proje köküne göre konumdan bağımsız çalışır.
+- `sqlite3` varsa **WAL-safe online yedek** alır (`.backup` + `.timeout 5000`);
+  `sqlite3` yoksa düz dosya kopyasına düşer (bu durumda WAL'daki en son yazılar
+  eksik kalabilir → üretimde `sudo apt-get install -y sqlite3` önerilir).
+- Çıktı: `db/backups/kaloriai-YYYYMMDD-HHMMSS.db.gz` (gzip).
+- Yalnız **en yeni 7** yedeği tutar, eskilerini siler.
+- Tek satır sonuç logu basar; hata durumunda sıfırdan farklı kodla çıkar.
+
+Kurulum + cron örneği (her gece 04:00):
+
+```bash
+sudo chmod +x /opt/kaloriai/scripts/backup-db.sh
+sudo -u kaloriai mkdir -p /opt/kaloriai/db/backups
+sudo -u kaloriai crontab -e
+# 0 4 * * * /opt/kaloriai/scripts/backup-db.sh >> /home/kaloriai/backup-db.log 2>&1
+```
+
+Test çalıştırması (elle):
+
+```bash
+sudo -u kaloriai /opt/kaloriai/scripts/backup-db.sh
+# → [backup-db] OK method=sqlite3-backup db=... file=... size=... kept=7 pruned=0
+```
+
+### Geri yükleme (restore)
+
+```bash
+sudo systemctl stop kaloriai
+
+# Eski WAL/SHM artıklarını temizle (önemli)
+sudo -u kaloriai rm -f /opt/kaloriai/db/custom.db-wal /opt/kaloriai/db/custom.db-shm
+
+# Yedeği aç ve yerine koy (YYYYMMDD-HHMMSS yerine ilgili yedeği yaz)
+sudo -u kaloriai gunzip -c /opt/kaloriai/db/backups/kaloriai-YYYYMMDD-HHMMSS.db.gz > /opt/kaloriai/db/custom.db
+
+sudo systemctl start kaloriai
+curl -s localhost:3000/api/auth/demo | head -c 80   # sağlık kontrolü
+```
+
+> Not: yalnız DB geri yüklenir — `upload/` içindeki AI fotoğrafları
+> geri gelmez. Tam yedek/geri yükleme için Bölüm 6'daki
+> `scripts/deploy/backup.sh` + `upload/` kopyasını kullanın.

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
+  Download,
   Droplets,
   Flame,
   Footprints,
@@ -144,8 +145,16 @@ export function ReportView({ open, onClose }: { open: boolean; onClose: () => vo
           <>
             {/* Dialog controls (never printed) */}
             <div className="kai-no-print absolute right-4 top-4 flex gap-2">
-              <Button size="sm" className="min-h-[36px]" onClick={() => window.print()}>
-                <Printer className="h-3.5 w-3.5" aria-hidden />
+              {/* PDF olarak kaydet — window.print() + tarayıcının "PDF olarak kaydet" hedefi */}
+              <Button
+                size="sm"
+                variant="outline"
+                className="min-h-[36px]"
+                onClick={() => window.print()}
+                aria-label={dict.report.print}
+                title={dict.report.print}
+              >
+                <Download className="h-3.5 w-3.5" aria-hidden />
                 {dict.report.print}
               </Button>
               <Button size="icon" variant="ghost" className="h-9 w-9" onClick={onClose} aria-label={dict.report.close}>
@@ -153,9 +162,9 @@ export function ReportView({ open, onClose }: { open: boolean; onClose: () => vo
               </Button>
             </div>
 
-            {/* Printable report */}
+            {/* Printable report — kai-report-root: print CSS'teki tek görünür ada (Task 5-c) */}
             <div
-              className="kai-print-area rounded-xl border border-neutral-200 bg-white p-5 text-neutral-900"
+              className="kai-print-area kai-report-root rounded-xl border border-neutral-200 bg-white p-5 text-neutral-900"
               role="article"
               aria-label={dict.report.title}
             >

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { localDateStr } from "@/lib/calculations";
+import { appToday } from "@/lib/tz";
 import { requireUser, errorResponse, ApiError } from "@/lib/auth";
 
 const schema = z.object({
@@ -33,7 +33,7 @@ export async function POST(req: Request) {
     const user = await requireUser();
     const parsed = schema.safeParse(await req.json());
     if (!parsed.success) throw new ApiError("VALIDATION", 400);
-    const date = parsed.data.date || localDateStr();
+    const date = parsed.data.date || appToday();
     // upsert on (userId, date): aynı güne ikinci POST çoğaltma değil GÜNCELLEME yapar;
     // gönderilmeyen alanlar eski değeri korur (undefined → Prisma dokunmaz), explicit null temizler.
     const existing = await db.bodyMeasurement.findFirst({ where: { userId: user.id, date } });

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { localDateStr } from "@/lib/calculations";
+import { appToday } from "@/lib/tz";
 import { requireUser, errorResponse, ApiError } from "@/lib/auth";
 
 const saveSchema = z.object({
@@ -22,7 +22,7 @@ export async function POST(req: Request) {
     const template = await db.mealLog.create({
       data: {
         userId: user.id,
-        date: localDateStr(),
+        date: appToday(),
         mealType: log.mealType,
         name: parsed.data.name,
         isTemplate: true,

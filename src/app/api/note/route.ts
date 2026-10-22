@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { localDateStr } from "@/lib/calculations";
+import { appToday } from "@/lib/tz";
 import { requireUser, errorResponse, ApiError } from "@/lib/auth";
 
 export const runtime = "nodejs";
@@ -20,7 +20,7 @@ export async function GET(req: Request) {
     const user = await requireUser();
     const url = new URL(req.url);
     const dateQ = dateQuery.safeParse(url.searchParams.get("date") ?? undefined);
-    const date = dateQ.success ? dateQ.data || localDateStr() : localDateStr();
+    const date = dateQ.success ? dateQ.data || appToday() : appToday();
     const note = await db.dailyNote.findUnique({
       where: { userId_date: { userId: user.id, date } },
     });
@@ -35,7 +35,7 @@ export async function POST(req: Request) {
     const user = await requireUser();
     const parsed = upsertSchema.safeParse(await req.json());
     if (!parsed.success) throw new ApiError("VALIDATION", 400);
-    const date = parsed.data.date || localDateStr();
+    const date = parsed.data.date || appToday();
     const mood = parsed.data.mood ?? null;
     const text = parsed.data.text?.trim() ? parsed.data.text.trim() : null;
     if (mood === null && text === null) {

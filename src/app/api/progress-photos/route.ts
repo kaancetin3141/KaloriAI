@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { localDateStr } from "@/lib/calculations";
+import { appToday } from "@/lib/tz";
 import { requireUser, errorResponse, ApiError, isPremium } from "@/lib/auth";
 import { promises as fs } from "fs";
 import path from "path";
@@ -34,7 +34,7 @@ export async function POST(req: Request) {
     const form = await req.formData();
     const file = form.get("image");
     const note = (form.get("note") as string) || null;
-    const date = (form.get("date") as string) || localDateStr();
+    const date = (form.get("date") as string) || appToday();
     if (!formSchema.safeParse({ date }).success) throw new ApiError("VALIDATION", 400);
     if (!(file instanceof File)) throw new ApiError("VALIDATION", 400);
     if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) throw new ApiError("FILE_TYPE", 415);

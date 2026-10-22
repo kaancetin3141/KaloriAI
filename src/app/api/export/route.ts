@@ -1,11 +1,13 @@
 import { db } from "@/lib/db";
 import { requireUser, errorResponse } from "@/lib/auth";
+import { appToday } from "@/lib/tz";
 
 /** GET /api/export?format=json|csv — KVKK/GDPR data portability */
 export async function GET(req: Request) {
   try {
     const user = await requireUser();
     const format = new URL(req.url).searchParams.get("format") || "json";
+    const exportDay = appToday(); // export filename uses the APP_TZ calendar day
     const [profile, targets, logs, water, workouts, measurements] = await Promise.all([
       db.profile.findUnique({ where: { userId: user.id } }),
       db.targets.findUnique({ where: { userId: user.id } }),
@@ -32,7 +34,7 @@ export async function GET(req: Request) {
       return new Response("\uFEFF" + rows.join("\n"), {
         headers: {
           "Content-Type": "text/csv; charset=utf-8",
-          "Content-Disposition": `attachment; filename="kaloriai-export-${new Date().toISOString().slice(0, 10)}.csv"`,
+          "Content-Disposition": `attachment; filename="kaloriai-export-${exportDay}.csv"`,
         },
       });
     }
@@ -46,7 +48,7 @@ export async function GET(req: Request) {
       {
         headers: {
           "Content-Type": "application/json",
-          "Content-Disposition": `attachment; filename="kaloriai-export-${new Date().toISOString().slice(0, 10)}.json"`,
+          "Content-Disposition": `attachment; filename="kaloriai-export-${exportDay}.json"`,
         },
       }
     );

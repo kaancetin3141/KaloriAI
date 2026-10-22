@@ -1,7 +1,7 @@
 import { z } from "zod";
 import ZAI from "z-ai-web-dev-sdk";
 import { db } from "@/lib/db";
-import { localDateStr } from "@/lib/calculations";
+import { appToday, addDaysIso } from "@/lib/tz";
 import { requireUser, errorResponse, ApiError, isPremium } from "@/lib/auth";
 
 export const runtime = "nodejs";
@@ -38,22 +38,18 @@ const schema = z.object({
   scope: z.enum(["day", "week"]).default("day"),
 });
 
-/** Monday of the ISO week containing d (local date math) */
+/** Monday of the ISO week containing dateStr (deterministic, UTC-anchored —
+ *  getUTCDay on a fixed 12:00Z instant; no host-machine calendar involved) */
 function mondayOf(dateStr: string): string {
-  const d = new Date(`${dateStr}T12:00:00`);
-  const day = d.getDay(); // 0=Sun..6=Sat
+  const d = new Date(`${dateStr}T12:00:00Z`);
+  const day = d.getUTCDay(); // 0=Sun..6=Sat
   const diff = day === 0 ? 6 : day - 1;
-  d.setDate(d.getDate() - diff);
-  return d.toLocaleDateString("en-CA");
+  return addDaysIso(dateStr, -diff);
 }
 
 function weekDates(monday: string): string[] {
   const out: string[] = [];
-  const d = new Date(`${monday}T12:00:00`);
-  for (let i = 0; i < 7; i++) {
-    out.push(d.toLocaleDateString("en-CA"));
-    d.setDate(d.getDate() + 1);
-  }
+  for (let i = 0; i < 7; i++) out.push(addDaysIso(monday, i));
   return out;
 }
 
@@ -261,7 +257,7 @@ export async function GET(req: Request) {
       return Response.json({ ok: true, scope: "week", weekOf: dates[0], dates, plans });
     }
 
-    const date = url.searchParams.get("date") || localDateStr();
+    const date = url.searchParams.get("date") || appToday();
     const day = await db.plannerDay.findUnique({
       where: { userId_date: { userId: user.id, date } },
     });

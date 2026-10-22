@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireUser, errorResponse, ApiError } from "@/lib/auth";
-import { waterTargetMl, localDateStr } from "@/lib/calculations";
+import { appToday } from "@/lib/tz";
+import { waterTargetMl } from "@/lib/calculations";
 
 const schema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
@@ -13,7 +14,7 @@ export async function POST(req: Request) {
     const user = await requireUser();
     const parsed = schema.safeParse(await req.json());
     if (!parsed.success) throw new ApiError("VALIDATION", 400);
-    const date = parsed.data.date || localDateStr();
+    const date = parsed.data.date || appToday();
     const existing = await db.waterLog.findFirst({ where: { userId: user.id, date } });
     const ml = Math.max(0, (existing?.ml ?? 0) + parsed.data.deltaMl);
     const log = existing
@@ -29,7 +30,7 @@ export async function POST(req: Request) {
 export async function GET(req: Request) {
   try {
     const user = await requireUser();
-    const date = new URL(req.url).searchParams.get("date") || localDateStr();
+    const date = new URL(req.url).searchParams.get("date") || appToday();
     const [log, profile] = await Promise.all([
       db.waterLog.findFirst({ where: { userId: user.id, date } }),
       db.profile.findUnique({ where: { userId: user.id } }),

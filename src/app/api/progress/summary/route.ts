@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { requireUser, errorResponse } from "@/lib/auth";
-import { calcStreak, adaptiveTdee, localDaysAgoStr } from "@/lib/calculations";
+import { appDaysAgoStr } from "@/lib/tz";
+import { calcStreak, adaptiveTdee } from "@/lib/calculations";
 
 /** GET /api/progress/summary?days=7|30|90 — charts + streak + adherence + adaptive TDEE */
 export async function GET(req: Request) {
@@ -9,7 +10,7 @@ export async function GET(req: Request) {
     const days = Math.min(Math.max(Number(new URL(req.url).searchParams.get("days") || 7), 7), 90);
     const dates: string[] = [];
     for (let i = days - 1; i >= 0; i--) {
-      dates.push(localDaysAgoStr(i));
+      dates.push(appDaysAgoStr(i));
     }
     const [logs, targets, workouts, water, measurements] = await Promise.all([
       db.mealLog.findMany({

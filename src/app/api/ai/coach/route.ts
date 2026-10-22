@@ -1,7 +1,7 @@
 import { z } from "zod";
 import ZAI from "z-ai-web-dev-sdk";
 import { db } from "@/lib/db";
-import { localDateStr } from "@/lib/calculations";
+import { appToday } from "@/lib/tz";
 import { requireUser, errorResponse, ApiError } from "@/lib/auth";
 import { createAiJob, getAiJob, startAiJob } from "@/lib/ai-jobs";
 
@@ -24,7 +24,7 @@ export async function POST(req: Request) {
     const parsed = schema.safeParse(await req.json());
     if (!parsed.success) throw new ApiError("VALIDATION", 400);
 
-    const today = localDateStr();
+    const today = appToday();
     const [targets, logs, history] = await Promise.all([
       db.targets.findUnique({ where: { userId: user.id } }),
       db.mealLog.findMany({

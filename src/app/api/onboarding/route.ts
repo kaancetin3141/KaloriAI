@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireUser, errorResponse, ApiError } from "@/lib/auth";
-import { localDateStr, calcTargets, waterTargetMl, type Sex, type Goal, type ActivityLevel, type UserType } from "@/lib/calculations";
+import { appToday } from "@/lib/tz";
+import { calcTargets, waterTargetMl, type Sex, type Goal, type ActivityLevel, type UserType } from "@/lib/calculations";
 
 const schema = z.object({
   locale: z.enum(["tr", "en"]).optional(),
@@ -102,7 +103,7 @@ export async function POST(req: Request) {
 
     // first weight measurement
     await db.bodyMeasurement.create({
-      data: { userId: user.id, date: localDateStr(), weightKg: d.weightKg, bodyFatPct: d.bodyFatPct ?? null },
+      data: { userId: user.id, date: appToday(), weightKg: d.weightKg, bodyFatPct: d.bodyFatPct ?? null },
     });
     if (d.locale) {
       await db.user.update({ where: { id: user.id }, data: { locale: d.locale } });

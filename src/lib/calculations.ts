@@ -3,6 +3,8 @@
  * No DB, no side effects — unit-testable. (Spec §4: "Keep calculation logic in pure functions")
  */
 
+import { addDaysIso, appDaysAgoStr, appToday, APP_TZ } from "@/lib/tz";
+
 export type Sex = "male" | "female";
 export type ActivityLevel = "sedentary" | "light" | "moderate" | "active" | "very_active";
 export type Goal = "lose" | "maintain" | "gain" | "muscle" | "performance";
@@ -23,12 +25,31 @@ export const KCAL_PER_KG = 7700;
 /** Athlete protein range g/kg (spec §4) */
 export const ATHLETE_PROTEIN_GKG = { min: 1.6, max: 2.2 } as const;
 
+/**
+ * Age in whole years as of the APP_TZ calendar "today" (deterministic across
+ * host machines — a UTC server and an Istanbul VDS agree; the 00:00–03:00 TR
+ * window no longer flips the age day relative to the app's display calendar).
+ * birthDate is expected as YYYY-MM-DD (profile birthDate column format).
+ */
 export function calcAge(birthDate: string, now: Date = new Date()): number {
-  const b = new Date(birthDate);
-  if (isNaN(b.getTime())) return 30;
-  const m = now.getMonth() - b.getMonth();
-  let age = now.getFullYear() - b.getFullYear();
-  if (m < 0 || (m === 0 && now.getDate() < b.getDate())) age--;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(birthDate.trim());
+  if (!m) {
+    // non-ISO fallback: compare UTC parts of the parsed instant
+    const b = new Date(birthDate);
+    if (isNaN(b.getTime())) return 30;
+    const [ty, tm, td] = appToday(now).split("-").map(Number);
+    let age = ty - b.getUTCFullYear();
+    const bm = b.getUTCMonth() + 1;
+    const bd = b.getUTCDate();
+    if (tm < bm || (tm === bm && td < bd)) age--;
+    return Math.max(0, age);
+  }
+  const by = Number(m[1]);
+  const bm = Number(m[2]);
+  const bd = Number(m[3]);
+  const [ty, tm, td] = appToday(now).split("-").map(Number);
+  let age = ty - by;
+  if (tm < bm || (tm === bm && td < bd)) age--;
   return Math.max(0, age);
 }
 
@@ -225,16 +246,19 @@ export function suggestTargetAdjustment(
   return Math.max(next, CALORIE_FLOOR[sex]);
 }
 
-/** Consecutive-day streak given set of logged dates (YYYY-MM-DD), counting back from today */
-export function calcStreak(loggedDates: Set<string>, today: Date): number {
-  const fmt = (d: Date) => localDateStr(d);
-  let streak = 0;
-  const d = new Date(today);
+/**
+ * Consecutive-day streak given set of logged dates (YYYY-MM-DD), counting back
+ * from the APP_TZ "today". Walks date STRINGS (deterministic UTC-anchored day
+ * math) — immune to host-TZ DST oddities of setDate()-based loops.
+ */
+export function calcStreak(loggedDates: Set<string>, today: Date = new Date()): number {
+  let cursor = localDateStr(today);
   // allow today not yet logged without breaking streak
-  if (!loggedDates.has(fmt(d))) d.setDate(d.getDate() - 1);
-  while (loggedDates.has(fmt(d))) {
+  if (!loggedDates.has(cursor)) cursor = addDaysIso(cursor, -1);
+  let streak = 0;
+  while (loggedDates.has(cursor)) {
     streak++;
-    d.setDate(d.getDate() - 1);
+    cursor = addDaysIso(cursor, -1);
   }
   return streak;
 }
@@ -337,21 +361,19 @@ export function projectGoalWeight(input: ProjectionInput): ProjectionResult {
 }
 
 /* ------------------------------------------------------------------ */
-/* App display timezone helpers (Europe/Istanbul — primary market)      */
-/* Server-side "today" must match the client's toLocaleDateString      */
-/* calendar, otherwise midnight-window bugs appear (00:00–03:00 TR).    */
+/* App display timezone helpers — delegates to src/lib/tz.ts            */
+/* (APP_TZ = Europe/Istanbul; server "today" is machine-independent).   */
+/* Kept as re-exports for backward compatibility with existing imports. */
 /* ------------------------------------------------------------------ */
 
-export const APP_TZ = "Europe/Istanbul";
+export { APP_TZ, appToday, appDaysAgoStr, addDaysIso };
 
 /** YYYY-MM-DD in the app display timezone (default: now) */
 export function localDateStr(d: Date = new Date()): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: APP_TZ }).format(d);
+  return appToday(d);
 }
 
 /** YYYY-MM-DD N days before today's local calendar date (deterministic window) */
 export function localDaysAgoStr(days: number, now: Date = new Date()): string {
-  const anchor = new Date(`${localDateStr(now)}T00:00:00Z`);
-  anchor.setUTCDate(anchor.getUTCDate() - days);
-  return anchor.toISOString().slice(0, 10);
+  return appDaysAgoStr(days, now);
 }

@@ -486,3 +486,92 @@
     display: none !important;
   }
 }
+
+/* ============================================================
+   PRINT — RAPOR PDF DIŞA AKTARIMI (Task 5-c, "PDF olarak kaydet")
+   report-view.tsx → window.print(). .kai-report-root, raporun
+   kök sabit sınıfıdır (.kai-print-area ile birlikte kullanılır):
+   yazdırırken ekranda yalnız bu ada görünür kalır; uygulama
+   kromu (nav/aside, toast, dialog düğmeleri) gizlenir.
+   ============================================================ */
+@media print {
+  @page {
+    margin: 12mm;
+  }
+
+  /* Yapısal krom: kenar çubuğu + gezinme asla rapora dahil değil */
+  nav,
+  aside,
+  [data-slot="dialog-overlay"],
+  [data-slot="alert-dialog-overlay"] {
+    display: none !important;
+  }
+
+  /* kai-no-print işaretli her şey (düğme satırları, toast'lar, kapatma X) */
+  .kai-no-print,
+  [role="alert"],
+  [role="status"] {
+    display: none !important;
+  }
+
+  /* Dekoratif arka planlar (skin mesh/aurora) yazdırmaya girmez */
+  body::before {
+    content: none !important;
+  }
+
+  /* Rapor adası: tek görünür alt-ağaç (kai-print-area ile eş anlamlı) */
+  body * {
+    visibility: hidden;
+  }
+  .kai-print-area,
+  .kai-report-root,
+  .kai-print-area *,
+  .kai-report-root * {
+    visibility: visible;
+  }
+  .kai-print-area,
+  .kai-report-root {
+    position: absolute !important;
+    inset: 0 auto auto 0;
+    width: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: white !important;
+    color: black !important;
+    /* Grafik/rozet renkleri (inline SVG dahil) birebir basılsın */
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Radix dialog sabit kutusunu gevşet — rapor sayfa akışına otursun */
+  [role="dialog"] {
+    position: static !important;
+    inset: auto !important;
+    transform: none !important;
+    width: auto !important;
+    max-width: none !important;
+    max-height: none !important;
+    overflow: visible !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    padding: 0 !important;
+  }
+
+  /* Tablo satırları ve kutular sayfa sonunda bölünmesin */
+  .kai-print-area tr,
+  .kai-report-root tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .kai-print-area h2,
+  .kai-report-root h2,
+  .kai-print-area h3,
+  .kai-report-root h3 {
+    page-break-after: avoid;
+    break-after: avoid;
+  }
+}
