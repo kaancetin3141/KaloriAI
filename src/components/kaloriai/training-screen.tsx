@@ -40,11 +40,15 @@ import {
 } from "@/components/ui/select";
 import { api, ApiError } from "@/lib/api";
 import { metForIntensity, workoutCalories } from "@/lib/calculations";
+import { appToday } from "@/lib/tz";
 import type { DiaryResponse, Workout } from "@/lib/types";
-import { useAppStore } from "@/stores/app-store";
+import { useAppStore, type GuidedExerciseState } from "@/stores/app-store";
 import { useToast } from "@/hooks/use-toast";
-
-const fmtDate = (d = new Date()) => d.toLocaleDateString("en-CA");
+import { GuidedHero } from "@/components/kaloriai/guided-workout/guided-hero";
+import { ActiveSession } from "@/components/kaloriai/guided-workout/active-session";
+import { RoutineSection } from "@/components/kaloriai/guided-workout/routine-section";
+import { StrengthStats } from "@/components/kaloriai/guided-workout/strength-stats";
+import { StrengthHistory } from "@/components/kaloriai/guided-workout/history-list";
 
 const WORKOUT_TYPES = [
   "running",
@@ -91,10 +95,11 @@ const TYPE_ICONS: Record<WorkoutType, typeof Zap> = {
 export function TrainingScreen() {
   const dict = useAppStore((s) => s.dict);
   const setTab = useAppStore((s) => s.setTab);
+  const startGuidedSession = useAppStore((s) => s.startGuidedSession);
   const { toast } = useToast();
   const qc = useQueryClient();
 
-  const today = fmtDate();
+  const today = appToday();
   const [type, setType] = useState<WorkoutType>("running");
   const [durationMin, setDurationMin] = useState("30");
   const [intensity, setIntensity] = useState<"light" | "moderate" | "vigorous">("moderate");
@@ -230,6 +235,16 @@ export function TrainingScreen() {
           <span className="font-semibold">{Math.round(weekBurned)} {dict.common.kcal}</span>
         </div>
       </div>
+
+      {/* Guided strength workout (openGym-style) */}
+      <GuidedHero
+        onStartEmpty={() => startGuidedSession("", [])}
+      />
+
+      <RoutineSection
+        date={today}
+        onStart={(name: string, exercises: GuidedExerciseState[]) => startGuidedSession(name, exercises)}
+      />
 
       {/* Weekly volume mini bar */}
       <Card>
@@ -454,6 +469,12 @@ export function TrainingScreen() {
         </CardContent>
       </Card>
 
+      {/* Strength stats (volume by muscle, best lifts, PR feed) */}
+      <StrengthStats />
+
+      {/* Strength history (expandable sessions) */}
+      <StrengthHistory />
+
       {/* Steps — Apple Watch / Health sync + manual entry */}
       <Card>
         <CardHeader className="pb-2">
@@ -631,6 +652,9 @@ export function TrainingScreen() {
           </Button>
         </div>
       )}
+
+      {/* Guided session overlay (set logging, rest timer, PRs) */}
+      <ActiveSession date={today} />
     </div>
   );
 }

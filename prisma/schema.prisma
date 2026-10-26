@@ -26,6 +26,8 @@ model User {
   aiAnalyses        AiAnalysis[]
   waterLogs         WaterLog[]
   workouts          Workout[]
+  workoutExercises  WorkoutExercise[]
+  routines          Routine[]
   measurements      BodyMeasurement[]
   progressPhotos    ProgressPhoto[]
   favorites         Favorite[]
@@ -245,7 +247,42 @@ model Workout {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  exercises   WorkoutExercise[]
+
   @@index([userId, date])
+}
+
+// One logged exercise inside a guided strength session (openGym-style set logging)
+model WorkoutExercise {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workoutId   String
+  workout     Workout  @relation(fields: [workoutId], references: [id], onDelete: Cascade)
+  order       Int
+  exerciseKey String // catalog key (exercise-catalog.ts) — stable forever
+  name        String // display name snapshot at log time
+  muscle      String // primary muscle group
+  equipment   String?
+  setsJson    String // JSON: [{reps:number, weightKg:number, rir?:number, pr?:boolean}]
+  createdAt   DateTime @default(now())
+
+  @@index([userId, exerciseKey, createdAt])
+  @@index([workoutId])
+}
+
+// Custom saved routines (starter templates live in routine-templates.ts, user copies are stored here)
+model Routine {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  notes     String?
+  daysJson  String // JSON: [{day:number, title:string, items:[{exerciseKey, sets, reps, restSec}]}]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
 }
 
 model BodyMeasurement {

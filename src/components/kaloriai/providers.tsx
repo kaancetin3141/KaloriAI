@@ -27,6 +27,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
     if (stored === "en" || stored === "tr") setLocale(stored);
     // Sync persisted skin into store (class itself already applied by head script)
     setSkin(getStoredSkin());
+    // Restore an in-progress guided strength workout (survives tab switch/reload)
+    useAppStore.getState().hydrateGuidedSession();
     api<{ user: SessionUser | null; mealNames?: MealNames | null }>("/api/auth/me")
       .then((res) => {
         setUser(res.user);

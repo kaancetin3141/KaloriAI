@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { useAppStore, type Tab } from "@/stores/app-store";
+import { GuidedMiniBar } from "@/components/kaloriai/guided-workout/guided-hero";
 import { ReminderNotifier } from "@/components/kaloriai/reminder-notifier";
 import { cn } from "@/lib/utils";
 import {
@@ -192,6 +193,9 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
           {dict.meta.appName} · {dict.auth.disclaimer}
         </footer>
       </div>
+
+      {/* In-progress guided workout pill (non-training tabs) */}
+      <GuidedMiniBar />
 
       {/* Mobile bottom tab bar */}
       <nav
