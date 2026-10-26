@@ -56,6 +56,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { api, ApiError } from "@/lib/api";
 import { runAiJob } from "@/lib/ai-client";
+import { MacroDonutCard } from "@/components/kaloriai/macro-donut-card";
 import { movingAverage, waterTargetMl } from "@/lib/calculations";
 import { kgToLb, lbToKg, CM_PER_IN } from "@/lib/units";
 import type { ProgressSummary, Measurement, Profile } from "@/lib/types";
@@ -639,6 +640,9 @@ export function ProgressScreen() {
               )}
             </CardContent>
           </Card>
+
+          {/* Makro kalori payı donut — ortalama dağılım */}
+          <MacroDonutCard summary={summary} />
         </>
       )}
 

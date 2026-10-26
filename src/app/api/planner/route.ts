@@ -3,6 +3,7 @@ import ZAI from "z-ai-web-dev-sdk";
 import { db } from "@/lib/db";
 import { appToday, addDaysIso } from "@/lib/tz";
 import { requireUser, errorResponse, ApiError, isPremium } from "@/lib/auth";
+import { createAiJob, getAiJob, startAiJob } from "@/lib/ai-jobs";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -94,7 +95,144 @@ async function requirePremium(userId: string) {
   if (!isPremium(sub)) throw new ApiError("PREMIUM_REQUIRED", 402);
 }
 
-/** POST /api/planner — premium: AI meal plan for a day or a whole week */
+interface PlannerContext {
+  userId: string;
+  date: string;
+  locale: "tr" | "en";
+  targets: { calories: number; protein: number; carbs: number; fat: number };
+  profile: { dietPreference?: string | null; allergens?: string | null; userType?: string | null } | null;
+}
+
+/** Tek günlük plan üret: AI turu + kayıt. (Arka plan işi içinde çağrılır.) */
+async function generateDayPlan(ctx: PlannerContext) {
+  const lang = ctx.locale === "en" ? "English" : "Turkish";
+  const zai = await ZAI.create();
+  const completion = await zai.chat.completions.create({
+    messages: [
+      {
+        role: "system",
+        content: `You are a meal planner. Respond in ${lang} with ONLY valid JSON, no markdown, no comments. Every JSON string value MUST be wrapped in double quotes. Create a one-day meal plan (breakfast, lunch, dinner, snacks) that fits the user's daily targets, respecting their dietary preference. Prefer simple, common ${
+          ctx.locale === "tr" ? "Turkish" : "local"
+        } foods with realistic portions.`,
+      },
+      {
+        role: "user",
+        content: `Targets: ${ctx.targets.calories} kcal, P${ctx.targets.protein}/C${ctx.targets.carbs}/F${ctx.targets.fat}. Diet: ${
+          ctx.profile?.dietPreference ?? "any"
+        }. Allergens: ${ctx.profile?.allergens || "none"}. User type: ${ctx.profile?.userType ?? "general"}.
+Schema: {"meals":[{"mealType":"breakfast","name":"...","items":[{"name":"...","grams":0,"kcal":0,"protein":0,"carbs":0,"fat":0}]}],"totalKcal":0,"shoppingList":["..."]}`,
+      },
+    ],
+    thinking: { type: "disabled" },
+  });
+  const content = completion.choices[0]?.message?.content ?? "";
+  const plan = dayPlanSchema.parse(extractJson(content));
+
+  const saved = await db.plannerDay.upsert({
+    where: { userId_date: { userId: ctx.userId, date: ctx.date } },
+    create: { userId: ctx.userId, date: ctx.date, planJson: JSON.stringify(plan) },
+    update: { planJson: JSON.stringify(plan) },
+  });
+  return { ok: true, scope: "day", plan: JSON.parse(saved.planJson), date: saved.date };
+}
+
+/** 7 günlük plan: tek AI çağrısı (tutarlı + ekonomik), 1 kez JSON onarım tekrarı. */
+async function generateWeekPlan(ctx: PlannerContext) {
+  const lang = ctx.locale === "en" ? "English" : "Turkish";
+  const zai = await ZAI.create();
+
+  const weekSystemPrompt = `You are a weekly meal planner. Respond in ${lang} with ONLY valid JSON, no markdown, no comments. IMPORTANT: every JSON string value MUST be wrapped in double quotes. Create a 7-day meal plan (each day: breakfast, lunch, dinner, snacks) that fits the user's daily targets. Vary the meals across days, keep it realistic and repeatable. Prefer simple, common ${
+    ctx.locale === "tr" ? "Turkish" : "local"
+  } foods with realistic portions. Provide ONE merged shopping list for the whole week with estimated quantities.`;
+  const weekUserPrompt = `Daily targets: ${ctx.targets.calories} kcal, P${ctx.targets.protein}/C${ctx.targets.carbs}/F${ctx.targets.fat}. Diet: ${
+    ctx.profile?.dietPreference ?? "any"
+  }. Allergens: ${ctx.profile?.allergens || "none"}. User type: ${ctx.profile?.userType ?? "general"}.
+Schema: {"days":[{"meals":[{"mealType":"breakfast","name":"...","items":[{"name":"...","grams":0,"kcal":0,"protein":0,"carbs":0,"fat":0}]}],"totalKcal":0}],"shoppingList":["..."]}
+"days" must contain exactly 7 entries, ordered Monday → Sunday.`;
+
+  let raw: unknown = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const messages: { role: "system" | "user" | "assistant"; content: string }[] =
+      attempt === 0
+        ? [
+            { role: "system", content: weekSystemPrompt },
+            { role: "user", content: weekUserPrompt },
+          ]
+        : [
+            { role: "system", content: weekSystemPrompt },
+            { role: "user", content: weekUserPrompt },
+            {
+              role: "assistant",
+              content:
+                typeof raw === "string" && raw
+                  ? raw.slice(0, 2000)
+                  : "...",
+            },
+            {
+              role: "user",
+              content:
+                "Your previous response was not valid JSON (a string value was missing double quotes). Return the full plan again as strictly valid JSON — quote every string value.",
+            },
+          ];
+    const completion = await zai.chat.completions.create({ messages, thinking: { type: "disabled" } });
+    const content = completion.choices[0]?.message?.content ?? "";
+    raw = content;
+    try {
+      const parsed = extractJson(content);
+      raw = content; // keep text for retry context
+      // validate shape below; if invalid we throw inside try
+      const daysArrCheck = parsed as { days?: unknown[]; shoppingList?: unknown };
+      if (!Array.isArray(daysArrCheck.days) || daysArrCheck.days.length < 7) {
+        throw new Error("too few days");
+      }
+      raw = parsed;
+      break;
+    } catch {
+      continue; // retry
+    }
+  }
+  if (!raw || typeof raw === "string") throw new ApiError("AI_FAILED", 502);
+  const obj = raw as { days?: unknown[]; shoppingList?: unknown };
+  const daysArr = obj.days as Record<string, unknown>[];
+  const shoppingList = Array.isArray(obj.shoppingList)
+    ? (obj.shoppingList as string[]).slice(0, 60)
+    : [];
+
+  const dates = weekDates(mondayOf(ctx.date));
+  const plans: Record<string, unknown> = {};
+  const upserts = await Promise.all(
+    dates.map((date, i) => {
+      const dayRaw = daysArr[i] ?? {};
+      const dayPlan = {
+        meals: (dayRaw.meals as unknown) ?? [],
+        totalKcal: (dayRaw.totalKcal as number) ?? 0,
+        shoppingList: i === 0 ? shoppingList : [], // keep list only on Monday row to avoid dupes
+      };
+      const validated = dayPlanSchema.parse(dayPlan);
+      plans[date] = validated;
+      return db.plannerDay.upsert({
+        where: { userId_date: { userId: ctx.userId, date } },
+        create: { userId: ctx.userId, date, planJson: JSON.stringify(validated) },
+        update: { planJson: JSON.stringify(validated) },
+      });
+    })
+  );
+  return {
+    ok: true,
+    scope: "week",
+    weekOf: dates[0],
+    dates,
+    plans: Object.fromEntries(upserts.map((u) => [u.date, JSON.parse(u.planJson)])),
+    shoppingList,
+  };
+}
+
+/**
+ * POST — hızlı aşama: premium + hedef doğrulaması (~1 DB turu) sonra iş arka
+ * plana atanır ve hemen jobId döner. Haftalık plan AI turu (15-30 sn, onarım
+ * tekrarı dahil) bağlantıyı meşgul etmez; istemci GET?id= ile yoklar.
+ * (Uzun istekler ara proxy'lerce kesiliyor → "Bağlantı hatası" sınıfı.)
+ */
 export async function POST(req: Request) {
   try {
     const user = await requireUser();
@@ -102,9 +240,6 @@ export async function POST(req: Request) {
 
     const parsed = schema.safeParse(await req.json());
     if (!parsed.success) throw new ApiError("VALIDATION", 400);
-    const locale = parsed.data.locale;
-    const lang = locale === "en" ? "English" : "Turkish";
-    const weekScope = parsed.data.scope === "week";
 
     const [targets, profile] = await Promise.all([
       db.targets.findUnique({ where: { userId: user.id } }),
@@ -112,135 +247,55 @@ export async function POST(req: Request) {
     ]);
     if (!targets) throw new ApiError("NO_TARGETS", 400);
 
-    const zai = await ZAI.create();
+    const jobId = createAiJob(user.id);
+    const ctx: PlannerContext = {
+      userId: user.id,
+      date: parsed.data.date,
+      locale: parsed.data.locale,
+      targets,
+      profile,
+    };
 
-    let plans: Record<string, unknown> = {};
-    let shoppingList: string[] = [];
-
-    const weekSystemPrompt = `You are a weekly meal planner. Respond in ${lang} with ONLY valid JSON, no markdown, no comments. IMPORTANT: every JSON string value MUST be wrapped in double quotes. Create a 7-day meal plan (each day: breakfast, lunch, dinner, snacks) that fits the user's daily targets. Vary the meals across days, keep it realistic and repeatable. Prefer simple, common ${
-      locale === "tr" ? "Turkish" : "local"
-    } foods with realistic portions. Provide ONE merged shopping list for the whole week with estimated quantities.`;
-    const weekUserPrompt = `Daily targets: ${targets.calories} kcal, P${targets.protein}/C${targets.carbs}/F${targets.fat}. Diet: ${
-      profile?.dietPreference ?? "any"
-    }. Allergens: ${profile?.allergens || "none"}. User type: ${profile?.userType ?? "general"}.
-Schema: {"days":[{"meals":[{"mealType":"breakfast","name":"...","items":[{"name":"...","grams":0,"kcal":0,"protein":0,"carbs":0,"fat":0}]}],"totalKcal":0}],"shoppingList":["..."]}
-"days" must contain exactly 7 entries, ordered Monday → Sunday.`;
-
-    if (weekScope) {
-      // One AI call → 7-day plan (cheaper + consistent across days); one retry on parse failure
-      let raw: unknown = null;
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const messages: { role: "system" | "user" | "assistant"; content: string }[] =
-          attempt === 0
-            ? [
-                { role: "system", content: weekSystemPrompt },
-                { role: "user", content: weekUserPrompt },
-              ]
-            : [
-                { role: "system", content: weekSystemPrompt },
-                { role: "user", content: weekUserPrompt },
-                {
-                  role: "assistant",
-                  content:
-                    typeof raw === "string" && raw
-                      ? raw.slice(0, 2000)
-                      : "...",
-                },
-                {
-                  role: "user",
-                  content:
-                    "Your previous response was not valid JSON (a string value was missing double quotes). Return the full plan again as strictly valid JSON — quote every string value.",
-                },
-              ];
-        const completion = await zai.chat.completions.create({ messages, thinking: { type: "disabled" } });
-        const content = completion.choices[0]?.message?.content ?? "";
-        raw = content;
-        try {
-          const parsed = extractJson(content);
-          raw = content; // keep text for retry context
-          // validate shape below; if invalid we throw inside try
-          const daysArrCheck = parsed as { days?: unknown[]; shoppingList?: unknown };
-          if (!Array.isArray(daysArrCheck.days) || daysArrCheck.days.length < 7) {
-            throw new Error("too few days");
-          }
-          raw = parsed;
-          break;
-        } catch {
-          continue; // retry
-        }
+    startAiJob(jobId, async () => {
+      try {
+        return parsed.data.scope === "week"
+          ? await generateWeekPlan(ctx)
+          : await generateDayPlan(ctx);
+      } catch (e) {
+        // ZodError vb. doğrudan 500'e sızmasın — job kaydına net kod yazılsın.
+        if (e instanceof ApiError) throw e;
+        console.error("[planner] job hatası:", e);
+        throw new ApiError("AI_FAILED", 502);
       }
-      if (!raw || typeof raw === "string") throw new ApiError("AI_FAILED", 502);
-      const obj = raw as { days?: unknown[]; shoppingList?: unknown };
-      const daysArr = obj.days as Record<string, unknown>[];
-      shoppingList = Array.isArray(obj.shoppingList) ? (obj.shoppingList as string[]).slice(0, 60) : [];
-
-      const dates = weekDates(mondayOf(parsed.data.date));
-      const upserts = await Promise.all(
-        dates.map((date, i) => {
-          const dayRaw = daysArr[i] ?? {};
-          const dayPlan = {
-            meals: (dayRaw.meals as unknown) ?? [],
-            totalKcal: (dayRaw.totalKcal as number) ?? 0,
-            shoppingList: i === 0 ? shoppingList : [], // keep list only on Monday row to avoid dupes
-          };
-          const validated = dayPlanSchema.parse(dayPlan);
-          plans[date] = validated;
-          return db.plannerDay.upsert({
-            where: { userId_date: { userId: user.id, date } },
-            create: { userId: user.id, date, planJson: JSON.stringify(validated) },
-            update: { planJson: JSON.stringify(validated) },
-          });
-        })
-      );
-      return Response.json({
-        ok: true,
-        scope: "week",
-        weekOf: dates[0],
-        dates,
-        plans: Object.fromEntries(upserts.map((u) => [u.date, JSON.parse(u.planJson)])),
-        shoppingList,
-      });
-    }
-
-    // ---- single day plan ----
-    const completion = await zai.chat.completions.create({
-      messages: [
-        {
-          role: "system",
-          content: `You are a meal planner. Respond in ${lang} with ONLY valid JSON, no markdown, no comments. Every JSON string value MUST be wrapped in double quotes. Create a one-day meal plan (breakfast, lunch, dinner, snacks) that fits the user's daily targets, respecting their dietary preference. Prefer simple, common ${
-            locale === "tr" ? "Turkish" : "local"
-          } foods with realistic portions.`,
-        },
-        {
-          role: "user",
-          content: `Targets: ${targets.calories} kcal, P${targets.protein}/C${targets.carbs}/F${targets.fat}. Diet: ${
-            profile?.dietPreference ?? "any"
-          }. Allergens: ${profile?.allergens || "none"}. User type: ${profile?.userType ?? "general"}.
-Schema: {"meals":[{"mealType":"breakfast","name":"...","items":[{"name":"...","grams":0,"kcal":0,"protein":0,"carbs":0,"fat":0}]}],"totalKcal":0,"shoppingList":["..."]}`,
-        },
-      ],
-      thinking: { type: "disabled" },
     });
-    const content = completion.choices[0]?.message?.content ?? "";
-    const plan = dayPlanSchema.parse(extractJson(content));
 
-    const saved = await db.plannerDay.upsert({
-      where: { userId_date: { userId: user.id, date: parsed.data.date } },
-      create: { userId: user.id, date: parsed.data.date, planJson: JSON.stringify(plan) },
-      update: { planJson: JSON.stringify(plan) },
-    });
-    return Response.json({ ok: true, scope: "day", plan: JSON.parse(saved.planJson), date: saved.date });
+    return Response.json({ ok: true, jobId, status: "pending" });
   } catch (e) {
     return errorResponse(e);
   }
 }
 
+/** GET?id= — yoklama: pending / done (tam plan sonucu) / error (ApiError). */
 /** GET /api/planner?date=YYYY-MM-DD          → single day plan
  *  GET /api/planner?week=YYYY-MM-DD          → all plans of that ISO week (Mon-Sun) */
 export async function GET(req: Request) {
   try {
     const user = await requireUser();
     const url = new URL(req.url);
+
+    // --- job polling (async plan üretimi) ---
+    const id = url.searchParams.get("id");
+    if (id) {
+      const job = getAiJob(id, user.id);
+      if (!job) throw new ApiError("JOB_NOT_FOUND", 404);
+      if (job.status === "pending") return Response.json({ ok: true, status: "pending" });
+      if (job.status === "error") {
+        throw new ApiError(job.error ?? "AI_FAILED", job.errorStatus ?? 502);
+      }
+      return Response.json({ ok: true, status: "done", ...(job.result as Record<string, unknown>) });
+    }
+
+    // --- normal plan sorguları ---
     const weekParam = url.searchParams.get("week");
 
     if (weekParam) {

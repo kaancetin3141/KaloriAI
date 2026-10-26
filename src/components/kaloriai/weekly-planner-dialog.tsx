@@ -29,6 +29,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { ApiError, api } from "@/lib/api";
+import { runAiJob } from "@/lib/ai-client";
 import { useAppStore } from "@/stores/app-store";
 
 const PaywallDialog = nextDynamic(
@@ -108,7 +109,9 @@ export function WeeklyPlannerDialog({ open, onClose }: { open: boolean; onClose:
   const plannedDays = dates.filter((d) => plans[d] && plans[d]!.meals.length > 0);
 
   const generate = useMutation({
-    mutationFn: () => api("/api/planner", { body: { date: dates[0], locale, scope: "week" } }),
+    // Kısa POST + yoklama — haftalık AI turu (15-30 sn) bağlantıyı meşgul etmez.
+    mutationFn: () =>
+      runAiJob("/api/planner", { body: { date: dates[0], locale, scope: "week" } }),
     onSuccess: () => {
       toast({ description: dict.planner.planSavedAll });
       void qc.invalidateQueries({ queryKey: ["planner-week", dates[0]] });

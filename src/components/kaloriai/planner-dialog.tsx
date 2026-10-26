@@ -25,6 +25,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { ApiError, api } from "@/lib/api";
+import { runAiJob } from "@/lib/ai-client";
 import { useAppStore } from "@/stores/app-store";
 
 /**
@@ -84,7 +85,9 @@ export function PlannerDialog({ open, onClose }: { open: boolean; onClose: () =>
   };
 
   const generate = useMutation({
-    mutationFn: () => api<{ plan: PlannerPlan }>("/api/planner", { body: { date, locale } }),
+    // Kısa POST + yoklama — AI turu (tek gün 3-10 sn) bağlantıyı meşgul etmez.
+    mutationFn: () =>
+      runAiJob<{ plan: PlannerPlan }>("/api/planner", { body: { date, locale } }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["planner", date] });
     },

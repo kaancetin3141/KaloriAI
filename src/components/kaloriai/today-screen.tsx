@@ -65,6 +65,7 @@ import {
 
 /** Uygulama saat diliminde "bugün" — sunucu gruplamasıyla aynı gün (TZ tutarlı). */
 import { appToday, appDaysAgoStr } from "@/lib/tz";
+import { GapsCard } from "@/components/kaloriai/gaps-card";
 
 /* ---------------- Daily nutrition grade (Cronometer-style carnet) ---------------- */
 interface GradeRow {
@@ -581,6 +582,9 @@ export function TodayScreen() {
           </div>
         </Card>
       </motion.div>
+
+      {/* Akıllı eksik analizi — kural tabanlı, anında, tek dokunuşla tamamla */}
+      <GapsCard />
 
       {/* Action grid */}
       <motion.section {...fade(2)} aria-label={dict.today.takePhoto} className="space-y-3">
