@@ -469,8 +469,8 @@ export function TrainingScreen() {
         </CardContent>
       </Card>
 
-      {/* Strength stats (volume by muscle, best lifts, PR feed) */}
-      <StrengthStats />
+      {/* Strength stats (volume by muscle, best lifts, PR feed, heatmap) */}
+      <StrengthStats date={today} />
 
       {/* Strength history (expandable sessions) */}
       <StrengthHistory />

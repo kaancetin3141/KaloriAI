@@ -7,7 +7,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  CalendarDays, Play, Trash2, Layers, X, Check, Repeat,
+  CalendarDays, Play, Trash2, Layers, X, Check, Repeat, Plus, Pencil,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,8 @@ import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { ROUTINE_TEMPLATES, type RoutineTemplate, type RoutineTemplateDay } from "@/lib/routine-templates";
 import { EXERCISE_MAP } from "@/lib/exercise-catalog";
+import type { RoutineDTO } from "@/lib/strength";
+import { RoutineEditor } from "./routine-editor";
 
 const LEVEL_VARIANT: Record<string, string> = {
   beginner: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
@@ -50,8 +52,10 @@ export function RoutineSection({ date, onStart }: Props) {
   );
   const [openTpl, setOpenTpl] = useState<string | null>(null);
   const [confirmRm, setConfirmRm] = useState<string | null>(null);
+  // undefined = editor closed, null = create mode, routine = edit mode
+  const [editorRoutine, setEditorRoutine] = useState<RoutineDTO | null | undefined>(undefined);
 
-  const routinesQ = useQuery<{ routines: { id: string; name: string; notes: string | null; days: { day: number; title: string; items: { exerciseKey: string; sets: number; reps: string; restSec: number }[] }[] }[] }>({
+  const routinesQ = useQuery<{ routines: RoutineDTO[] }>({
     queryKey: ["routines"],
     queryFn: () => api("/api/workouts/routines"),
     staleTime: 5 * 60_000,
@@ -235,7 +239,18 @@ export function RoutineSection({ date, onStart }: Props) {
 
         {/* My routines */}
         <div className="space-y-2">
-          <p className="text-xs font-medium text-muted-foreground">{dict.guided.myRoutines}</p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-medium text-muted-foreground">{dict.guided.myRoutines}</p>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 rounded-lg text-xs px-2.5 text-primary hover:text-primary"
+              onClick={() => setEditorRoutine(null)}
+            >
+              <Plus className="h-3.5 w-3.5 mr-0.5" aria-hidden />
+              {dict.guided.editor.newTitle}
+            </Button>
+          </div>
           {routinesQ.isLoading ? (
             <Skeleton className="h-14 w-full rounded-xl" />
           ) : savedRoutines.length === 0 ? (
@@ -290,9 +305,18 @@ export function RoutineSection({ date, onStart }: Props) {
                           {dict.guided.start}
                         </Button>
                       )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 rounded-lg text-muted-foreground hover:text-primary shrink-0"
+                        onClick={() => setEditorRoutine(r)}
+                        aria-label={dict.guided.editor.editTitle}
+                      >
+                        <Pencil className="h-3.5 w-3.5" aria-hidden />
+                      </Button>
                       {confirmRm === r.id ? (
                         <div className="flex items-center gap-1 shrink-0">
-                          <Button variant="destructive" size="sm" className="h-7 text-xs rounded-lg px-2" onClick={() => deleteRoutine.mutate(r.id)} disabled={deleteRoutine.isPending}>
+                          <Button variant="destructive" size="sm" className="h-7 text-xs rounded-lg px-2" onClick={() => deleteRoutine.mutate(r.id)} disabled={deleteRoutine.isPending} aria-label={dict.common.confirm}>
                             <Check className="h-3 w-3" aria-hidden />
                           </Button>
                           <Button variant="ghost" size="sm" className="h-7 rounded-lg px-2" onClick={() => setConfirmRm(null)} aria-label={dict.common.cancel}>
@@ -312,6 +336,14 @@ export function RoutineSection({ date, onStart }: Props) {
           )}
         </div>
       </CardContent>
+
+      {/* Routine create/edit editor */}
+      <RoutineEditor
+        open={editorRoutine !== undefined}
+        onOpenChange={(v) => !v && setEditorRoutine(undefined)}
+        routine={editorRoutine ?? null}
+        onSaved={() => qc.invalidateQueries({ queryKey: ["routines"] })}
+      />
     </Card>
   );
 }

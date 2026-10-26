@@ -12,7 +12,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   X, Trash2, Plus, Check, Trophy, Flame, Timer as TimerIcon, Minimize2,
   BookmarkPlus, ArrowLeft, Loader2, History as HistoryIcon, Sun, Dumbbell,
-  Disc3, TrendingUp,
+  Disc3, TrendingUp, Link2, Link2Off,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +33,44 @@ interface RestState {
 }
 
 const DEFAULT_REST = 90;
+/** superset geçiş dinlenmesi — tam tur tamamlanmadan kısa geçiş (openGym) */
+const SUPERSET_SWITCH_SEC = 20;
+
+/** superset grup renkleri (grup sırasına göre dönerli — indigo/mavi yok) */
+const SUPERSET_BORDER = [
+  "border-l-emerald-500",
+  "border-l-amber-500",
+  "border-l-rose-500",
+  "border-l-violet-500",
+] as const;
+const SUPERSET_BADGE = [
+  "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+  "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+  "bg-rose-500/15 text-rose-700 dark:text-rose-400",
+  "bg-violet-500/15 text-violet-700 dark:text-violet-400",
+] as const;
+
+/** Her egzersiz için superset grup etiketi (A1/A2/B1…) — tekil egzersizler etiketsiz.
+ * Grup: ardışık egzersizler zinciri (superset=true öncekiyle birleşir). */
+function computeGroupMeta(exercises: GuidedExerciseState[]): { label: string | null; colorIdx: number }[] {
+  const runs: { start: number; end: number }[] = [];
+  let runStart = 0;
+  for (let i = 1; i <= exercises.length; i++) {
+    const chained = i < exercises.length && exercises[i].superset === true;
+    if (!chained) {
+      if (i - 1 > runStart) runs.push({ start: runStart, end: i - 1 });
+      runStart = i;
+    }
+  }
+  const meta = exercises.map(() => ({ label: null as string | null, colorIdx: 0 }));
+  runs.forEach((r, gi) => {
+    const letter = String.fromCharCode(65 + (gi % 26));
+    for (let i = r.start; i <= r.end; i++) {
+      meta[i] = { label: `${letter}${i - r.start + 1}`, colorIdx: gi % SUPERSET_BORDER.length };
+    }
+  });
+  return meta;
+}
 
 function fmtElapsed(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -81,6 +119,7 @@ export function ActiveSession({ date }: Props) {
 
   const [step, setStep] = useState<"train" | "summary">("train");
   const [rest, setRest] = useState<RestState | null>(null);
+  const [restHint, setRestHint] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [saveErr, setSaveErr] = useState<string | null>(null);
@@ -292,14 +331,34 @@ export function ActiveSession({ date }: Props) {
         i === exIdx ? { ...e, sets: e.sets.map((st, j) => (j === setIdx ? { ...st, done: willDone } : st)) } : e,
       ),
     }));
-    // openGym behaviour: completing a set starts the rest timer
+    // openGym behaviour: completing a set starts the rest timer.
+    // Superset: grupta sıradaki egzersiz varsa kısa geçiş sayacı + ipucu;
+    // turun sonundaysa tam dinlenme.
     if (willDone) {
-      setRest({ endsAt: Date.now() + ex.restSec * 1000, total: ex.restSec });
+      const nextEx = session.exercises[exIdx + 1];
+      if (nextEx?.superset === true) {
+        setRestHint(nextEx.name);
+        setRest({ endsAt: Date.now() + SUPERSET_SWITCH_SEC * 1000, total: SUPERSET_SWITCH_SEC });
+      } else {
+        setRestHint(null);
+        setRest({ endsAt: Date.now() + ex.restSec * 1000, total: ex.restSec });
+      }
     }
+  };
+
+  /** egzersizi öncekiyle superset olarak bağla / çöz */
+  const toggleSuperset = (exIdx: number) => {
+    patch((s) => ({
+      ...s,
+      exercises: s.exercises.map((e, i) =>
+        i === exIdx ? { ...e, superset: e.superset === true ? undefined : true } : e,
+      ),
+    }));
   };
 
   /* ---------- derived ---------- */
   const exercises = session?.exercises ?? [];
+  const groupMeta = useMemo(() => computeGroupMeta(exercises), [exercises]);
   const doneSets = exercises.flatMap((e) => e.sets).filter((s) => s.done && validSet(s.reps, s.weightKg));
   const volume = doneSets.reduce((v, s) => v + num(s.reps) * num(s.weightKg), 0);
   const allSets = exercises.flatMap((e) => e.sets).filter((s) => validSet(s.reps, s.weightKg));
@@ -473,12 +532,15 @@ export function ActiveSession({ date }: Props) {
                     key={`${ex.exerciseKey}-${exIdx}`}
                     ex={ex}
                     exIdx={exIdx}
+                    group={groupMeta[exIdx]}
+                    canSuperset={exIdx > 0}
                     dict={dict}
                     onRemove={() => removeExercise(exIdx)}
                     onAddSet={() => addSet(exIdx)}
                     onRemoveSet={(setIdx) => removeSet(exIdx, setIdx)}
                     onUpdateSet={(setIdx, field, value) => updateSet(exIdx, setIdx, field, value)}
                     onToggleSet={(setIdx) => toggleSet(exIdx, setIdx)}
+                    onToggleSuperset={() => toggleSuperset(exIdx)}
                     onShowDetail={(key, name) => setDetail({ key, name })}
                   />
                 ))}
@@ -498,6 +560,7 @@ export function ActiveSession({ date }: Props) {
                     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}>
                       <RestTimer
                         rest={rest}
+                        hint={restHint}
                         onDone={() => setRest(null)}
                         onAdd15={() => setRest((r) => (r ? { endsAt: r.endsAt + 15_000, total: r.total + 15 } : r))}
                         onSkip={() => setRest(null)}
@@ -637,16 +700,21 @@ export function ActiveSession({ date }: Props) {
 interface ExerciseCardProps {
   ex: GuidedExerciseState;
   exIdx: number;
+  /** superset grup etiketi (A1/A2…) — tekil egzersizde null */
+  group: { label: string | null; colorIdx: number } | undefined;
+  /** ilk egzersiz superset olamaz */
+  canSuperset: boolean;
   dict: ReturnType<typeof useAppStore.getState>["dict"];
   onRemove: () => void;
   onAddSet: () => void;
   onRemoveSet: (setIdx: number) => void;
   onUpdateSet: (setIdx: number, field: "reps" | "weightKg" | "rir", value: string) => void;
   onToggleSet: (setIdx: number) => void;
+  onToggleSuperset: () => void;
   onShowDetail: (key: string, name: string) => void;
 }
 
-function ExerciseCard({ ex, exIdx, dict, onRemove, onAddSet, onRemoveSet, onUpdateSet, onToggleSet, onShowDetail }: ExerciseCardProps) {
+function ExerciseCard({ ex, exIdx, group, canSuperset, dict, onRemove, onAddSet, onRemoveSet, onUpdateSet, onToggleSet, onToggleSuperset, onShowDetail }: ExerciseCardProps) {
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [plateOpen, setPlateOpen] = useState(false);
   const [plateSeq, setPlateSeq] = useState(0);
@@ -670,8 +738,14 @@ function ExerciseCard({ ex, exIdx, dict, onRemove, onAddSet, onRemoveSet, onUpda
     return w > 0 ? w : null;
   }, [ex.sets]);
 
+  const linked = ex.superset === true;
+
   return (
-    <div className="rounded-2xl border bg-card overflow-hidden">
+    <div
+      className={`rounded-2xl border bg-card overflow-hidden ${
+        group?.label ? `border-l-4 ${SUPERSET_BORDER[group.colorIdx]}` : ""
+      }`}
+    >
       <div className="p-3 flex items-start gap-2 border-b bg-muted/30">
         <span className="text-xs font-bold text-muted-foreground tabular-nums pt-1">{exIdx + 1}.</span>
         <div className="flex-1 min-w-0">
@@ -681,6 +755,14 @@ function ExerciseCard({ ex, exIdx, dict, onRemove, onAddSet, onRemoveSet, onUpda
             aria-label={`${ex.name} — ${dict.guided.detail.openHint}`}
             title={dict.guided.detail.openHint}
           >
+            {group?.label && (
+              <span
+                className={`rounded-md px-1.5 py-0.5 text-[10px] font-extrabold tabular-nums shrink-0 ${SUPERSET_BADGE[group.colorIdx]}`}
+                title={dict.guided.superset.label}
+              >
+                {group.label}
+              </span>
+            )}
             <span className="truncate">{ex.name}</span>
           </button>
           <div className="flex items-center gap-1.5 mt-1 flex-wrap">
@@ -723,6 +805,19 @@ function ExerciseCard({ ex, exIdx, dict, onRemove, onAddSet, onRemoveSet, onUpda
           )}
         </div>
         <div className="flex flex-col items-end gap-1 shrink-0">
+          {canSuperset && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onToggleSuperset}
+              aria-pressed={linked}
+              aria-label={linked ? dict.guided.superset.unlink : dict.guided.superset.link}
+              title={linked ? dict.guided.superset.unlink : dict.guided.superset.link}
+              className={`rounded-lg h-7 w-7 ${linked ? SUPERSET_BADGE[group?.colorIdx ?? 0] : "text-muted-foreground hover:text-primary"}`}
+            >
+              {linked ? <Link2Off className="h-3.5 w-3.5" aria-hidden /> : <Link2 className="h-3.5 w-3.5" aria-hidden />}
+            </Button>
+          )}
           {ex.equipment === "barbell" && (
             <Button
               variant="ghost"
@@ -744,7 +839,7 @@ function ExerciseCard({ ex, exIdx, dict, onRemove, onAddSet, onRemoveSet, onUpda
               <Button variant="destructive" size="sm" className="h-7 text-xs rounded-lg px-2" onClick={onRemove}>
                 {dict.common.confirm}
               </Button>
-              <Button variant="ghost" size="sm" className="h-7 text-xs rounded-lg px-2" onClick={() => setConfirmRemove(false)}>
+              <Button variant="ghost" size="sm" className="h-7 text-xs rounded-lg px-2" onClick={() => setConfirmRemove(false)} aria-label={dict.common.cancel}>
                 <X className="h-3.5 w-3.5" aria-hidden />
               </Button>
             </div>

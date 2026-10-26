@@ -23,6 +23,8 @@ export interface GuidedExerciseState {
   restSec: number;
   /** planned label from routine template, e.g. "8-10" */
   targetReps?: string;
+  /** true → previous exercise ile superset grubu (openGym A1/A2 gösterimi) */
+  superset?: boolean;
   sets: GuidedSetState[];
   /** lazy-loaded history (for pre-fill + live PR detection) */
   prevBest?: number;

@@ -6,7 +6,7 @@
  * `left` is derived at render time; an interval only forces re-renders.
  */
 import { useEffect, useReducer, useRef } from "react";
-import { Timer, SkipForward, Plus, Bell, BellOff } from "lucide-react";
+import { Timer, SkipForward, Plus, Bell, BellOff, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app-store";
@@ -22,6 +22,8 @@ interface Props {
   onAdd15: () => void;
   onSkip: () => void;
   className?: string;
+  /** superset geçişi: sıradaki egzersiz adı (normal dinlenmede null) */
+  hint?: string | null;
 }
 
 function beep(): void {
@@ -51,7 +53,7 @@ function beep(): void {
   }
 }
 
-export function RestTimer({ rest, onDone, onAdd15, onSkip, className }: Props) {
+export function RestTimer({ rest, onDone, onAdd15, onSkip, className, hint }: Props) {
   const dict = useAppStore((s) => s.dict);
   const soundOn = useAppStore((s) => s.guidedSession?.soundOn ?? true);
   const patch = useAppStore((s) => s.patchGuidedSession);
@@ -117,11 +119,19 @@ export function RestTimer({ rest, onDone, onAdd15, onSkip, className }: Props) {
 
       <div className="min-w-0 flex-1">
         <p className={cn("text-sm font-bold tabular-nums", finished && "text-primary")}>
-          {finished ? dict.guided.restDone : dict.guided.restTimer}
+          {finished ? dict.guided.restDone : hint ? dict.guided.superset.switchHint : dict.guided.restTimer}
         </p>
         <p className="text-2xl font-extrabold tabular-nums leading-none mt-0.5">
           {mm > 0 ? `${mm}:${String(ss).padStart(2, "0")}` : `${ss}s`}
         </p>
+        {hint && (
+          <p className="text-[11px] text-muted-foreground truncate mt-0.5 flex items-center gap-1">
+            <ArrowRight className="h-3 w-3 shrink-0 text-emerald-500" aria-hidden />
+            <span className="truncate">
+              {dict.guided.superset.next}: <span className="font-medium text-foreground">{hint}</span>
+            </span>
+          </p>
+        )}
       </div>
 
       <div className="flex items-center gap-1.5 shrink-0">

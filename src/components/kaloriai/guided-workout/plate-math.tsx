@@ -50,7 +50,7 @@ export function PlateMathDialog({ open, onOpenChange, initialWeight }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-sm p-0 gap-0">
+      <DialogContent className="max-w-sm p-0 gap-0" aria-describedby={undefined}>
         <DialogHeader className="p-4 pb-3 border-b">
           <DialogTitle className="flex items-center gap-2 text-base">
             <Disc3 className="h-4 w-4 text-primary" aria-hidden />

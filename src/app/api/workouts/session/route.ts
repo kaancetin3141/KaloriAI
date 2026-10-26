@@ -2,6 +2,7 @@
  * Guided strength sessions (openGym-style set logging).
  * POST   → save full session (PR detection included)
  * GET    → list recent sessions with exercises
+ * PATCH  → edit a saved session (sets/name/duration/date, PRs re-detected)
  * DELETE ?id= → delete a session (cascades exercises)
  */
 import { z } from "zod";
@@ -39,6 +40,14 @@ const postSchema = z.object({
   durationMin: z.number().int().min(1).max(600),
   exercises: z.array(exerciseSchema).min(1).max(30),
   addToTarget: z.boolean().optional(),
+});
+
+const patchSchema = z.object({
+  id: z.string().min(1).max(60),
+  name: z.string().max(80).optional().nullable(),
+  durationMin: z.number().int().min(1).max(600),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  exercises: z.array(exerciseSchema).min(1).max(30),
 });
 
 function toDTO(
@@ -168,6 +177,91 @@ export async function POST(req: Request) {
     });
 
     return Response.json({ ok: true, session: toDTO(workout), prs }, { status: 201 });
+  } catch (e) {
+    return errorResponse(e);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* PATCH — edit a saved session. Sets are replaced wholesale (delete +
+ * re-create), PR flags re-detected against the REST of the history
+ * (this session's rows are excluded from "previous best"). */
+export async function PATCH(req: Request) {
+  try {
+    const user = await requireUser();
+    const rl = checkRateLimit(`wsession:${user.id}:${clientIp(req)}`, 30, 60_000);
+    if (!rl.allowed) throw new ApiError("RATE_LIMITED", 429);
+    const parsed = patchSchema.safeParse(await req.json());
+    if (!parsed.success) throw new ApiError("VALIDATION", 400);
+    const data = parsed.data;
+
+    // Ownership-checked fetch (IDOR-safe)
+    const existing = await db.workout.findFirst({
+      where: { id: data.id, userId: user.id, type: "strength" },
+      include: { exercises: true },
+    });
+    if (!existing) throw new ApiError("NOT_FOUND", 404);
+
+    // Date: past 365 days or today only (no future sessions)
+    const date = data.date ?? existing.date;
+    if (date > appToday() || date < appDaysAgoStr(365)) throw new ApiError("VALIDATION", 400);
+
+    const profile = await db.profile.findUnique({ where: { userId: user.id } });
+    const weightKg = profile?.weightKg ?? 70;
+
+    // Previous all-time best e1RM per key EXCLUDING this session's own rows →
+    // editing re-runs PR detection against the rest of the history only.
+    const keys = [...new Set(data.exercises.map((e) => e.exerciseKey))];
+    const prevRows = await db.workoutExercise.findMany({
+      where: { userId: user.id, exerciseKey: { in: keys }, workoutId: { not: data.id } },
+      select: { exerciseKey: true, setsJson: true },
+    });
+    const prevBestByKey: Record<string, number> = {};
+    for (const row of prevRows) {
+      const best = parseSets(row.setsJson).reduce((b, s) => Math.max(b, prMetricOfSet(s.weightKg, s.reps)), 0);
+      prevBestByKey[row.exerciseKey] = Math.max(prevBestByKey[row.exerciseKey] ?? 0, best);
+    }
+    const { prs, flaggedSets } = detectPRs(data.exercises, prevBestByKey);
+
+    const met = strengthSessionMet(data.exercises as SessionExerciseInput[]);
+    const calories = workoutCalories(met, weightKg, data.durationMin);
+    // undefined name → keep current; null/"" → clear
+    const name = data.name === undefined ? existing.name : data.name;
+
+    const updated = await db.$transaction(async (tx) => {
+      await tx.workoutExercise.deleteMany({ where: { workoutId: data.id } });
+      return tx.workout.update({
+        where: { id: data.id },
+        data: {
+          name,
+          durationMin: data.durationMin,
+          ...(data.date ? { date } : {}),
+          met,
+          calories,
+          exercises: {
+            create: data.exercises.map((ex, i) => ({
+              userId: user.id,
+              order: i,
+              exerciseKey: ex.exerciseKey,
+              name: ex.name,
+              muscle: ex.muscle,
+              equipment: ex.equipment ?? null,
+              setsJson: JSON.stringify(
+                ex.sets.map((s, si) => ({
+                  reps: s.reps,
+                  weightKg: Math.round(s.weightKg * 10) / 10,
+                  ...(s.rir != null ? { rir: s.rir } : {}),
+                  ...(flaggedSets[ex.exerciseKey]?.[si] ? { pr: true } : {}),
+                })),
+              ),
+            })),
+          },
+        },
+        include: { exercises: { orderBy: { order: "asc" } } },
+      });
+    });
+
+    return Response.json({ ok: true, session: toDTO(updated), prs });
   } catch (e) {
     return errorResponse(e);
   }

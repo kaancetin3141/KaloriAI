@@ -1,6 +1,7 @@
 /**
- * Strength stats (openGym-inspired): weekly volume per muscle, best lifts by e1RM, recent PRs.
- * GET ?days=7|30 → { volumeByMuscle, bestLifts, recentPRs, totals }
+ * Strength stats (openGym-inspired): weekly volume per muscle, best lifts by e1RM, recent PRs,
+ * 16-week activity heatmap (openGym "yearly activity heatmap" concept, phone-sized window).
+ * GET ?days=7|30 → { volumeByMuscle, bestLifts, recentPRs, totals, heatmap }
  */
 import { db } from "@/lib/db";
 import { requireUser, errorResponse } from "@/lib/auth";
@@ -94,6 +95,26 @@ export async function GET(req: Request) {
       where: { userId: user.id, type: "strength", date: { gte: since } },
     });
 
+    /* 16 haftalık aktivite ısı haritası — seans tarihine (YYYY-MM-DD) göre günlük tonaj */
+    const heatSince = appDaysAgoStr(111); // bugün dahil 112 gün = 16 tam hafta
+    const heatWorkouts = await db.workout.findMany({
+      where: { userId: user.id, type: "strength", date: { gte: heatSince } },
+      select: { date: true, exercises: { select: { setsJson: true } } },
+    });
+    const heatByDate = new Map<string, { volume: number; sets: number }>();
+    for (const w of heatWorkouts) {
+      const acc = heatByDate.get(w.date) ?? { volume: 0, sets: 0 };
+      for (const ex of w.exercises) {
+        const sets = parseSets(ex.setsJson);
+        acc.volume += sets.reduce((v, s) => v + s.reps * s.weightKg, 0);
+        acc.sets += sets.length;
+      }
+      heatByDate.set(w.date, acc);
+    }
+    const heatmap = [...heatByDate.entries()]
+      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+      .map(([date, v]) => ({ date, volume: Math.round(v.volume), sets: v.sets }));
+
     const bestLifts = [...bestByKey.values()].sort((a, b) => b.e1rm - a.e1rm).slice(0, 8);
 
     return Response.json({
@@ -106,6 +127,7 @@ export async function GET(req: Request) {
       })),
       bestLifts,
       recentPRs: recentPRs.slice(-10).reverse(),
+      heatmap,
     });
   } catch (e) {
     return errorResponse(e);

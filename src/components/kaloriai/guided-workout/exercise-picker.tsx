@@ -99,7 +99,7 @@ export function ExercisePicker({ open, onOpenChange, onPick }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[85vh] flex flex-col p-0 gap-0">
+      <DialogContent className="max-w-lg max-h-[85vh] flex flex-col p-0 gap-0" aria-describedby={undefined}>
         <DialogHeader className="p-4 pb-3 border-b shrink-0">
           <DialogTitle className="flex items-center gap-2 text-base">
             <Dumbbell className="h-4 w-4 text-primary" aria-hidden />

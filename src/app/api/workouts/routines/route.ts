@@ -1,7 +1,7 @@
 /**
  * Custom routines (openGym-style weekly plan). Starter templates are client-side
  * (routine-templates.ts); saved copies live here.
- * GET → list, POST → create, DELETE ?id= → delete own routine.
+ * GET → list, POST → create, PUT → update own, DELETE ?id= → delete own routine.
  */
 import { z } from "zod";
 import { db } from "@/lib/db";
@@ -27,6 +27,8 @@ const postSchema = z.object({
   notes: z.string().max(300).optional().nullable(),
   days: z.array(daySchema).min(1).max(7),
 });
+
+const putSchema = postSchema.extend({ id: z.string().min(1).max(60) });
 
 export async function GET() {
   try {
@@ -108,6 +110,46 @@ export async function POST(req: Request) {
       },
       { status: 201 },
     );
+  } catch (e) {
+    return errorResponse(e);
+  }
+}
+
+export async function PUT(req: Request) {
+  try {
+    const user = await requireUser();
+    const rl = checkRateLimit(`routine:${user.id}:${clientIp(req)}`, 20, 60_000);
+    if (!rl.allowed) throw new ApiError("RATE_LIMITED", 429);
+    const parsed = putSchema.safeParse(await req.json());
+    if (!parsed.success) throw new ApiError("VALIDATION", 400);
+    const data = parsed.data;
+    // ownership check — only own routines can be edited
+    const existing = await db.routine.findFirst({ where: { id: data.id, userId: user.id } });
+    if (!existing) throw new ApiError("NOT_FOUND", 404);
+    // exerciseKeys must exist in the catalog (garbage keys rejected)
+    for (const day of data.days) {
+      for (const item of day.items) {
+        if (!EXERCISE_MAP[item.exerciseKey]) throw new ApiError("VALIDATION", 400);
+      }
+    }
+    const routine = await db.routine.update({
+      where: { id: data.id },
+      data: {
+        name: data.name,
+        notes: data.notes ?? null,
+        daysJson: JSON.stringify(data.days),
+      },
+    });
+    return Response.json({
+      ok: true,
+      routine: {
+        id: routine.id,
+        name: routine.name,
+        notes: routine.notes,
+        days: safeDays(routine.daysJson),
+        updatedAt: routine.updatedAt.toISOString(),
+      },
+    });
   } catch (e) {
     return errorResponse(e);
   }
