@@ -32,6 +32,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { api, ApiError } from "@/lib/api";
+import { runAiJob } from "@/lib/ai-client";
 import type { FoodItem } from "@/lib/types";
 import { useAppStore } from "@/stores/app-store";
 import { useToast } from "@/hooks/use-toast";
@@ -237,8 +238,9 @@ export function RecipeDialog({
   };
 
   const analyzeImport = useMutation({
+    // Kısa POST + yoklama — sayfa çekme + AI turu bağlantıyı meşgul etmez.
     mutationFn: () =>
-      api<ImportResponse>("/api/recipes/import", {
+      runAiJob<ImportResponse>("/api/recipes/import", {
         body: { url: importUrl.trim(), locale },
       }),
     onSuccess: (res) => {

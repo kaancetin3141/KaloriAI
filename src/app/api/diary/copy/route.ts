@@ -9,13 +9,25 @@ const schema = z.object({
   mealType: z.enum(["breakfast", "lunch", "dinner", "snacks"]).optional(),
 });
 
-/** POST /api/diary/copy — copy a meal or whole day to another date */
+/**
+ * POST /api/diary/copy — bir öğünü ya da bütün günü başka bir tarihe kopyalar.
+ * (Defter diyaloğu varsayılanı "yarın"a kopyalamadır → gelecek hedef serbest.)
+ *
+ * Korumalar:
+ * - Kaynak = hedef reddedilir (kendine kopyalama anlamsız çiftleme yaratır).
+ * - Tek istekte makul üst sınır: 100 öğe (deli girdi / yanlış hedef koruması).
+ *
+ * Kaynakta kayıt yoksa 404 NOT_FOUND döner; istemci bunu dostça "kaynak boş"
+ * bilgisi olarak gösterir. Yanıt: { ok, count: öğün sayısı, items: öğe sayısı }.
+ */
 export async function POST(req: Request) {
   try {
     const user = await requireUser();
     const parsed = schema.safeParse(await req.json());
     if (!parsed.success) throw new ApiError("VALIDATION", 400);
     const { mode, sourceDate, targetDate, mealType } = parsed.data;
+
+    if (sourceDate === targetDate) throw new ApiError("VALIDATION", 400);
 
     const logs = await db.mealLog.findMany({
       where: {
@@ -29,7 +41,11 @@ export async function POST(req: Request) {
     });
     if (!logs.length) throw new ApiError("NOT_FOUND", 404);
 
-    const created = await Promise.all(
+    // Deli girdi koruması: tek seferde makul üst sınır
+    const totalItems = logs.reduce((a, l) => a + l.items.length, 0);
+    if (totalItems > 100) throw new ApiError("VALIDATION", 400);
+
+    const created = await db.$transaction(
       logs.map((log) =>
         db.mealLog.create({
           data: {
@@ -57,7 +73,7 @@ export async function POST(req: Request) {
         })
       )
     );
-    return Response.json({ ok: true, count: created.length });
+    return Response.json({ ok: true, count: created.length, items: totalItems });
   } catch (e) {
     return errorResponse(e);
   }

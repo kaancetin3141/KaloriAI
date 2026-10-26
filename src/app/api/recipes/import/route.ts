@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { appToday } from "@/lib/tz";
 import { requireUser, errorResponse, ApiError, isPremium } from "@/lib/auth";
 import { assertPublicHttpUrl, fetchWithGuard, UrlBlockedError } from "@/lib/url-guard";
+import { createAiJob, getAiJob, startAiJob } from "@/lib/ai-jobs";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -146,7 +147,12 @@ const draftSchema = z.object({
 
 export type RecipeDraft = z.infer<typeof draftSchema>;
 
-/** POST /api/recipes/import — fetch URL, extract recipe via AI, return draft (quota-gated) */
+/**
+ * POST — hızlı aşama: URL doğrulanır, kota kontrol edilir ve iş arka plana
+ * atanarak hemen jobId döner. Sayfa çekme (12 sn timeout'a kadar) + AI turu
+ * bağlantıyı meşgul etmez; istemci GET?id= ile yoklar. (Uzun istekler ara
+ * proxy'lerce kesiliyor → "Bağlantı hatası" sınıfı hatasının kökeni.)
+ */
 export async function POST(req: Request) {
   try {
     const user = await requireUser();
@@ -167,43 +173,82 @@ export async function POST(req: Request) {
 
     await checkQuota(user.id);
 
-    const { title, text } = await extractPage(url.toString());
-    if (text.length < 150) throw new ApiError("FETCH_FAILED", 422);
+    const jobId = createAiJob(user.id);
+    const pageUrl = url.toString();
+    const locale = parsed.data.locale;
 
-    const zai = await ZAI.create();
-    const completion = await zai.chat.completions.create({
-      messages: [
-        { role: "system", content: "You are a precise recipe extractor. Output only valid JSON." },
-        { role: "user", content: buildPrompt(text, parsed.data.locale, url.toString()) },
-      ],
-      thinking: { type: "disabled" },
+    startAiJob(jobId, async () => {
+      // UrlBlockedError işin içinde fırlayabilir → ApiError'a çevir (job kaydına
+      // kodla yazılsın, istemci net bir hata görsün).
+      let page: { title: string; text: string };
+      try {
+        page = await extractPage(pageUrl);
+      } catch (e) {
+        if (e instanceof UrlBlockedError) throw new ApiError("URL_BLOCKED", 400);
+        throw e;
+      }
+      if (page.text.length < 150) throw new ApiError("FETCH_FAILED", 422);
+
+      const zai = await ZAI.create();
+      const completion = await zai.chat.completions.create({
+        messages: [
+          { role: "system", content: "You are a precise recipe extractor. Output only valid JSON." },
+          { role: "user", content: buildPrompt(page.text, locale, pageUrl) },
+        ],
+        thinking: { type: "disabled" },
+      });
+      const content = completion.choices[0]?.message?.content ?? "";
+      const raw = extractJson(content);
+      const parsedDraft = draftSchema.safeParse(raw);
+      if (!parsedDraft.success) {
+        // LLM output malformed (e.g. non-recipe page produced null fields) → friendly 422, never a 500
+        throw new ApiError("NOT_A_RECIPE", 422);
+      }
+      const draft = parsedDraft.data;
+      if (!draft.isRecipe) throw new ApiError("NOT_A_RECIPE", 422);
+
+      await bumpQuota(user.id);
+
+      const record = await db.aiAnalysis.create({
+        data: {
+          userId: user.id,
+          rawResponse: JSON.stringify(draft),
+          confidence: 0.6,
+          itemType: "recipe_import",
+          textInput: pageUrl.slice(0, 2000),
+        },
+      });
+
+      return {
+        importId: record.id,
+        draft,
+        sourceTitle: page.title.length > 1 ? page.title.slice(0, 160) : null,
+      };
     });
-    const content = completion.choices[0]?.message?.content ?? "";
-    const raw = extractJson(content);
-    const parsedDraft = draftSchema.safeParse(raw);
-    if (!parsedDraft.success) {
-      // LLM output malformed (e.g. non-recipe page produced null fields) → friendly 422, never a 500
-      throw new ApiError("NOT_A_RECIPE", 422);
-    }
-    const draft = parsedDraft.data;
-    if (!draft.isRecipe) throw new ApiError("NOT_A_RECIPE", 422);
 
-    await bumpQuota(user.id);
-
-    const record = await db.aiAnalysis.create({
-      data: {
-        userId: user.id,
-        rawResponse: JSON.stringify(draft),
-        confidence: 0.6,
-        itemType: "recipe_import",
-        textInput: url.toString().slice(0, 2000),
-      },
-    });
-
-    const sourceTitle = title.length > 1 ? title.slice(0, 160) : null;
-    return Response.json({ ok: true, importId: record.id, draft, sourceTitle });
+    return Response.json({ ok: true, jobId, status: "pending" });
   } catch (e) {
     if (e instanceof UrlBlockedError) return errorResponse(new ApiError("URL_BLOCKED", 400));
+    return errorResponse(e);
+  }
+}
+
+/** GET?id= — yoklama: pending / done (tam sonuç) / error (ApiError). */
+export async function GET(req: Request) {
+  try {
+    const user = await requireUser();
+    const id = new URL(req.url).searchParams.get("id");
+    if (!id) throw new ApiError("VALIDATION", 400);
+
+    const job = getAiJob(id, user.id);
+    if (!job) throw new ApiError("JOB_NOT_FOUND", 404);
+
+    if (job.status === "pending") return Response.json({ ok: true, status: "pending" });
+    if (job.status === "error") {
+      throw new ApiError(job.error ?? "AI_FAILED", job.errorStatus ?? 502);
+    }
+    return Response.json({ ok: true, status: "done", ...(job.result as Record<string, unknown>) });
+  } catch (e) {
     return errorResponse(e);
   }
 }

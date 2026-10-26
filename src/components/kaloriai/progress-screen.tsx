@@ -55,6 +55,7 @@ import {
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { api, ApiError } from "@/lib/api";
+import { runAiJob } from "@/lib/ai-client";
 import { movingAverage, waterTargetMl } from "@/lib/calculations";
 import { kgToLb, lbToKg, CM_PER_IN } from "@/lib/units";
 import type { ProgressSummary, Measurement, Profile } from "@/lib/types";
@@ -160,9 +161,12 @@ export function ProgressScreen() {
     queryFn: () => api<ProgressSummary>(`/api/progress/summary?days=${days}`),
   });
 
+  // Kısa POST + yoklama — AI turu bağlantıyı meşgul etmez; taze önbellek varsa anında döner.
   const insightQ = useQuery<{ insight: string }>({
     queryKey: ["insight", locale],
-    queryFn: () => api<{ insight: string }>(`/api/ai/insights?locale=${locale}`),
+    queryFn: () => runAiJob<{ insight: string }>("/api/ai/insights", { body: { locale } }),
+    staleTime: 5 * 60 * 1000,
+    retry: 1,
   });
 
   const photosQ = useQuery<{ photos: ProgressPhoto[] }>({

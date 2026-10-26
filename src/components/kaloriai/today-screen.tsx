@@ -11,6 +11,7 @@ import {
   ChevronDown,
   ChevronRight,
   Coffee,
+  Copy,
   Droplets,
   Dumbbell,
   Flame,
@@ -28,7 +29,7 @@ import {
   Wheat,
   Zap,
 } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { runAiJob } from "@/lib/ai-client";
 import { useAppStore, mealLabel } from "@/stores/app-store";
 import { useToast } from "@/hooks/use-toast";
@@ -62,8 +63,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-/** Local date → YYYY-MM-DD */
-const fmtDate = (d: Date = new Date()) => d.toLocaleDateString("en-CA");
+/** Uygulama saat diliminde "bugün" — sunucu gruplamasıyla aynı gün (TZ tutarlı). */
+import { appToday, appDaysAgoStr } from "@/lib/tz";
 
 /* ---------------- Daily nutrition grade (Cronometer-style carnet) ---------------- */
 interface GradeRow {
@@ -307,7 +308,7 @@ export function TodayScreen() {
   const { dict, locale, user, setTab, setCoachOpen, mealNames } = useAppStore();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const date = useMemo(() => fmtDate(), []);
+  const date = useMemo(() => appToday(), []);
 
   const [captureOpen, setCaptureOpen] = useState(false);
   const [textOpen, setTextOpen] = useState(false);
@@ -329,9 +330,12 @@ export function TodayScreen() {
     queryKey: ["summary", 7],
     queryFn: () => api<ProgressSummary>("/api/progress/summary?days=7"),
   });
+  // Kısa POST + yoklama — AI turu bağlantıyı meşgul etmez; taze önbellek varsa anında döner.
   const insightQ = useQuery({
     queryKey: ["insight", locale],
-    queryFn: () => api<{ insight: string }>(`/api/ai/insights?locale=${locale}`),
+    queryFn: () => runAiJob<{ insight: string }>("/api/ai/insights", { body: { locale } }),
+    staleTime: 5 * 60 * 1000,
+    retry: 1,
   });
   const stepsQ = useQuery({
     queryKey: ["steps", 1],
@@ -384,6 +388,32 @@ export function TodayScreen() {
       invalidateLogs();
     },
     onError: () => toast({ title: dict.common.error, variant: "destructive" }),
+  });
+
+  // Dünden kopyala: dünün tüm öğünlerini (mikrolar dahil) bugüne tek dokunuşla aktar.
+  // Tek endpoint: /api/diary/copy (öğün/gün kopyalamanın ortak altyapısı).
+  const copyYesterday = useMutation({
+    mutationFn: () =>
+      api<{ ok: boolean; count: number; items: number }>("/api/diary/copy", {
+        body: { mode: "day", sourceDate: appDaysAgoStr(1), targetDate: date },
+      }),
+    onSuccess: (res) => {
+      toast({
+        title: dict.today.copyYesterdayDone,
+        description: dict.today.copyYesterdayCount
+          .replace("{meals}", String(res.count))
+          .replace("{items}", String(res.items)),
+      });
+      invalidateLogs();
+    },
+    onError: (err) => {
+      // Kaynak gün boş → dostça bilgi; diğerleri gerçek hata.
+      if (err instanceof ApiError && err.status === 404) {
+        toast({ title: dict.today.copyYesterdayEmpty });
+        return;
+      }
+      toast({ title: dict.common.error, variant: "destructive" });
+    },
   });
 
   const waterAdd = useMutation({
@@ -562,7 +592,7 @@ export function TodayScreen() {
           <span className="text-base font-semibold">{dict.today.takePhoto}</span>
           <span className="text-xs font-normal opacity-80">{dict.today.takePhotoSub}</span>
         </Button>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Button
             variant="outline"
             onClick={() => setVoiceOpen(true)}
@@ -589,6 +619,19 @@ export function TodayScreen() {
             <span className="hidden text-[11px] font-normal text-muted-foreground sm:block">
               {dict.today.quickAddSub}
             </span>
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => copyYesterday.mutate()}
+            disabled={copyYesterday.isPending}
+            aria-label={dict.today.copyYesterday}
+            className="kai-pressable h-auto min-h-[44px] flex-col gap-1 rounded-2xl py-3"
+          >
+            <Copy
+              className={`h-5 w-5 text-emerald-500 ${copyYesterday.isPending ? "animate-pulse" : ""}`}
+              aria-hidden
+            />
+            <span className="text-sm font-medium">{dict.today.copyYesterday}</span>
           </Button>
         </div>
       </motion.section>
