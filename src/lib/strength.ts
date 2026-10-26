@@ -84,6 +84,87 @@ export function prMetricOfSet(weightKg: number, reps: number): number {
   return weightKg > 0 ? estimate1RM(weightKg, reps) : reps;
 }
 
+/* ------------------------------------------------------------------ */
+/* Progression suggestion (openGym-inspired: "each target explains
+ * why it is that number"). Pure heuristic on last logged sets. */
+
+export interface ProgressionSuggestion {
+  weightKg: number;
+  reps: number;
+  reason: "up" | "reps" | "hold" | "new";
+}
+
+/** Suggest the next working target from the last session's sets.
+ *  - loaded & ≥8 reps → +2.5 kg (double-progression step up)
+ *  - loaded & 5-7 reps → same weight, +1 rep (rep range climb)
+ *  - loaded & <5 reps → hold (fatigue signal)
+ *  - bodyweight → best reps + 1
+ */
+export function suggestNext(sets: { reps: number; weightKg: number }[]): ProgressionSuggestion | null {
+  if (!sets || sets.length === 0) return { weightKg: 0, reps: 0, reason: "new" };
+  const top = sets.reduce((b, s) =>
+    s.weightKg > b.weightKg || (s.weightKg === b.weightKg && s.reps > b.reps) ? s : b,
+  );
+  if (top.weightKg > 0) {
+    if (top.reps >= 8) {
+      return {
+        weightKg: Math.round((top.weightKg + 2.5) * 10) / 10,
+        reps: Math.max(6, Math.round(top.reps * 0.75)),
+        reason: "up",
+      };
+    }
+    if (top.reps >= 5) return { weightKg: top.weightKg, reps: top.reps + 1, reason: "reps" };
+    return { weightKg: top.weightKg, reps: top.reps, reason: "hold" };
+  }
+  const best = sets.reduce((m, s) => Math.max(m, s.reps), 0);
+  return best > 0 ? { weightKg: 0, reps: best + 1, reason: "reps" } : null;
+}
+
+/* ------------------------------------------------------------------ */
+/* Plate math (openGym-inspired): greedy per-side loading
+ * from standard olympic plates for a target total weight. */
+
+const STANDARD_PLATES = [25, 20, 15, 10, 5, 2.5, 1.25] as const;
+
+export interface PlateLoadResult {
+  /** per-side plates, big → small, only non-zero counts */
+  plates: { kg: number; count: number }[];
+  perSideTotal: number;
+  /** leftover kg per side that the plate inventory can't build */
+  remainder: number;
+  /** nearest loadable totals around the target */
+  nearestBelow: number;
+  nearestAbove: number;
+}
+
+export function calcPlates(targetKg: number, barKg: number): PlateLoadResult {
+  const side = Math.round(((targetKg - barKg) / 2) * 100) / 100;
+  if (side <= 0) {
+    return { plates: [], perSideTotal: 0, remainder: 0, nearestBelow: barKg, nearestAbove: barKg };
+  }
+  let left = side;
+  const plates: { kg: number; count: number }[] = [];
+  for (const kg of STANDARD_PLATES) {
+    const count = Math.floor(Math.round(left * 100) / (kg * 100));
+    if (count > 0) {
+      plates.push({ kg, count });
+      left = Math.round((left - count * kg) * 100) / 100;
+    }
+  }
+  const perSideTotal = Math.round((side - left) * 100) / 100;
+  const smallest = STANDARD_PLATES[STANDARD_PLATES.length - 1];
+  const nearestBelow = Math.round((barKg + 2 * perSideTotal) * 10) / 10;
+  const nearestAbove =
+    left > 0 ? Math.round((nearestBelow + 2 * smallest) * 10) / 10 : nearestBelow;
+  return {
+    plates,
+    perSideTotal,
+    remainder: Math.round(left * 100) / 100,
+    nearestBelow,
+    nearestAbove,
+  };
+}
+
 /** Volume (tonnage) of one exercise: sum(reps × weight) */
 export function volumeOfSets(sets: StrengthSet[]): number {
   return sets.reduce((v, s) => v + s.reps * s.weightKg, 0);

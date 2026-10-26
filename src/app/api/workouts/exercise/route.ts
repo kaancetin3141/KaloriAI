@@ -1,10 +1,12 @@
 /**
  * Per-exercise strength history (openGym: pre-fill weights from last time + PR curve).
- * GET ?exerciseKey=xxx → { history: [{date, sets, best1RM}], best, last }
+ * GET ?exerciseKey=xxx → { history: [{date, sets, best1RM, metric}], best, last }
+ * `metric` = PR metric (e1RM when loaded, best reps when bodyweight) — chartable
+ * for every exercise; `best1RM` stays pure Epley e1RM.
  */
 import { db } from "@/lib/db";
 import { requireUser, errorResponse, ApiError } from "@/lib/auth";
-import { parseSets, estimate1RM, type StrengthSet } from "@/lib/strength";
+import { parseSets, estimate1RM, prMetricOfSet, type StrengthSet } from "@/lib/strength";
 
 export async function GET(req: Request) {
   try {
@@ -23,11 +25,13 @@ export async function GET(req: Request) {
         date: r.createdAt.toISOString(),
         sets,
         best1RM: sets.reduce((b, s) => Math.max(b, estimate1RM(s.weightKg, s.reps)), 0),
+        metric: sets.reduce((b, s) => Math.max(b, prMetricOfSet(s.weightKg, s.reps)), 0),
       };
     });
     const best = history.reduce((b, h) => Math.max(b, h.best1RM), 0);
+    const bestMetric = history.reduce((b, h) => Math.max(b, h.metric), 0);
     const last: StrengthSet[] | null = history[0]?.sets ?? null;
-    return Response.json({ history, best, last });
+    return Response.json({ history, best, bestMetric, last });
   } catch (e) {
     return errorResponse(e);
   }

@@ -12,6 +12,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   X, Trash2, Plus, Check, Trophy, Flame, Timer as TimerIcon, Minimize2,
   BookmarkPlus, ArrowLeft, Loader2, History as HistoryIcon, Sun, Dumbbell,
+  Disc3, TrendingUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,10 +20,12 @@ import { Badge } from "@/components/ui/badge";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { useAppStore, type GuidedExerciseState } from "@/stores/app-store";
 import { api, ApiError } from "@/lib/api";
-import { estimate1RM, strengthSessionMet } from "@/lib/strength";
+import { estimate1RM, strengthSessionMet, suggestNext } from "@/lib/strength";
 import { useToast } from "@/hooks/use-toast";
 import { RestTimer } from "./rest-timer";
 import { ExercisePicker, muscleBadgeClass, type PickedExercise } from "./exercise-picker";
+import { ExerciseDetailSheet } from "./exercise-detail-sheet";
+import { PlateMathDialog } from "./plate-math";
 
 interface RestState {
   endsAt: number;
@@ -81,6 +84,7 @@ export function ActiveSession({ date }: Props) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [saveErr, setSaveErr] = useState<string | null>(null);
+  const [detail, setDetail] = useState<{ key: string; name: string } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   /* elapsed clock */
@@ -91,13 +95,63 @@ export function ActiveSession({ date }: Props) {
   }, [open]);
 
   /* reset local state on new session */
+  const loadedKeys = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (session) {
       setStep("train");
       setRest(null);
       setSaveErr(null);
+      loadedKeys.current.clear();
     }
   }, [session?.startedAt]);
+
+  /* lazy-load exercise history (PR baseline + pre-fill) for every catalog
+   * exercise in the session that doesn't have it yet — covers sessions
+   * started from routine templates and repeated workouts, not just picker. */
+  useEffect(() => {
+    if (!open || !session) return;
+    const keys = [...new Set(
+      session.exercises
+        .filter(
+          (e) =>
+            !e.exerciseKey.startsWith("custom:") &&
+            e.prevBest == null &&
+            !e.lastSets &&
+            !loadedKeys.current.has(e.exerciseKey),
+        )
+        .map((e) => e.exerciseKey),
+    )];
+    if (keys.length === 0) return;
+    keys.forEach((k) => loadedKeys.current.add(k));
+    keys.forEach((exerciseKey) => {
+      api<{ best: number; last: { reps: number; weightKg: number }[] | null }>(
+        `/api/workouts/exercise?exerciseKey=${encodeURIComponent(exerciseKey)}`,
+      )
+        .then((res) => {
+          patch((s) => ({
+            ...s,
+            exercises: s.exercises.map((ex) =>
+              ex.exerciseKey === exerciseKey
+                ? {
+                    ...ex,
+                    prevBest: res.best,
+                    lastSets: res.last ?? undefined,
+                    sets:
+                      !res.last || res.last.length === 0 || ex.sets.some((st) => st.reps || st.weightKg)
+                        ? ex.sets
+                        : ex.sets.map((set, i) =>
+                            i === 0
+                              ? { ...set, reps: String(res.last![0].reps), weightKg: String(res.last![0].weightKg) }
+                              : set,
+                          ),
+                  }
+                : ex,
+            ),
+          }));
+        })
+        .catch(() => {});
+    });
+  }, [open, session, patch]);
 
   /* screen wake lock (openGym: "the screen stays awake while you train") */
   const keepAwake = session?.keepAwake ?? false;
@@ -138,8 +192,9 @@ export function ActiveSession({ date }: Props) {
           },
         ],
       }));
-      // lazy-load history for pre-fill + PR baseline
+      // lazy-load history for pre-fill + PR baseline (bulk effect skips it via loadedKeys)
       if (!picked.exerciseKey.startsWith("custom:")) {
+        loadedKeys.current.add(picked.exerciseKey);
         api<{ history: { sets: { reps: number; weightKg: number }[] }[]; best: number; last: { reps: number; weightKg: number }[] | null }>(
           `/api/workouts/exercise?exerciseKey=${encodeURIComponent(picked.exerciseKey)}`,
         )
@@ -424,6 +479,7 @@ export function ActiveSession({ date }: Props) {
                     onRemoveSet={(setIdx) => removeSet(exIdx, setIdx)}
                     onUpdateSet={(setIdx, field, value) => updateSet(exIdx, setIdx, field, value)}
                     onToggleSet={(setIdx) => toggleSet(exIdx, setIdx)}
+                    onShowDetail={(key, name) => setDetail({ key, name })}
                   />
                 ))}
                 <button
@@ -564,6 +620,13 @@ export function ActiveSession({ date }: Props) {
         {pickerOpen && (
           <ExercisePicker open onOpenChange={setPickerOpen} onPick={addExercise} />
         )}
+        <ExerciseDetailSheet
+          exerciseKey={detail?.key ?? null}
+          name={detail?.name ?? ""}
+          onOpenChange={(v) => {
+            if (!v) setDetail(null);
+          }}
+        />
       </motion.div>
     </AnimatePresence>
   );
@@ -580,18 +643,46 @@ interface ExerciseCardProps {
   onRemoveSet: (setIdx: number) => void;
   onUpdateSet: (setIdx: number, field: "reps" | "weightKg" | "rir", value: string) => void;
   onToggleSet: (setIdx: number) => void;
+  onShowDetail: (key: string, name: string) => void;
 }
 
-function ExerciseCard({ ex, exIdx, dict, onRemove, onAddSet, onRemoveSet, onUpdateSet, onToggleSet }: ExerciseCardProps) {
+function ExerciseCard({ ex, exIdx, dict, onRemove, onAddSet, onRemoveSet, onUpdateSet, onToggleSet, onShowDetail }: ExerciseCardProps) {
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [plateOpen, setPlateOpen] = useState(false);
+  const [plateSeq, setPlateSeq] = useState(0);
   const lastPerf = ex.lastSets?.[0];
+
+  /* progression suggestion from last performance (openGym-style "why" hint) */
+  const sug = useMemo(() => suggestNext(ex.lastSets ?? []), [ex.lastSets]);
+  const applySuggestion = () => {
+    if (!sug) return;
+    const idx = ex.sets.findIndex((s) => !s.done && (!s.reps || !s.weightKg));
+    const target = idx >= 0 ? idx : 0;
+    onUpdateSet(target, "weightKg", sug.weightKg > 0 ? String(sug.weightKg) : "0");
+    onUpdateSet(target, "reps", String(sug.reps));
+  };
+  const topWeight = useMemo(() => {
+    let w = 0;
+    for (const s of ex.sets) {
+      const v = num(s.weightKg);
+      if (Number.isFinite(v) && v > w) w = v;
+    }
+    return w > 0 ? w : null;
+  }, [ex.sets]);
 
   return (
     <div className="rounded-2xl border bg-card overflow-hidden">
       <div className="p-3 flex items-start gap-2 border-b bg-muted/30">
         <span className="text-xs font-bold text-muted-foreground tabular-nums pt-1">{exIdx + 1}.</span>
         <div className="flex-1 min-w-0">
-          <p className="font-semibold text-sm truncate">{ex.name}</p>
+          <button
+            onClick={() => onShowDetail(ex.exerciseKey, ex.name)}
+            className="font-semibold text-sm truncate text-left hover:underline underline-offset-2 decoration-primary/50 flex items-center gap-1 max-w-full"
+            aria-label={`${ex.name} — ${dict.guided.detail.openHint}`}
+            title={dict.guided.detail.openHint}
+          >
+            <span className="truncate">{ex.name}</span>
+          </button>
           <div className="flex items-center gap-1.5 mt-1 flex-wrap">
             <Badge variant="secondary" className={`text-[10px] ${muscleBadgeClass(ex.muscle)}`}>
               {dict.guided.muscles[ex.muscle as keyof typeof dict.guided.muscles] ?? ex.muscle}
@@ -614,21 +705,55 @@ function ExerciseCard({ ex, exIdx, dict, onRemove, onAddSet, onRemoveSet, onUpda
               </span>
             )}
           </div>
+          {sug && sug.reason !== "new" && (
+            <button
+              onClick={applySuggestion}
+              className={`mt-1.5 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium tabular-nums transition-colors ${
+                sug.reason === "up"
+                  ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/25"
+                  : "bg-primary/10 text-primary hover:bg-primary/20"
+              }`}
+              title={dict.guided.sug[sug.reason]}
+              aria-label={`${dict.guided.sug.label}: ${sug.weightKg > 0 ? `${sug.weightKg} kg × ${sug.reps}` : `${sug.reps}×`} — ${dict.guided.sug[sug.reason]}`}
+            >
+              <TrendingUp className="h-3 w-3" aria-hidden />
+              {dict.guided.sug.label}:
+              {sug.weightKg > 0 ? ` ${sug.weightKg}${dict.common.kg} × ${sug.reps}` : ` ${sug.reps}×`}
+            </button>
+          )}
         </div>
-        {confirmRemove ? (
-          <div className="flex items-center gap-1 shrink-0">
-            <Button variant="destructive" size="sm" className="h-7 text-xs rounded-lg px-2" onClick={onRemove}>
-              {dict.common.confirm}
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          {ex.equipment === "barbell" && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => {
+                // seq bump remounts the dialog → fresh prefill from current sets
+                setPlateSeq((n) => n + 1);
+                setPlateOpen(true);
+              }}
+              className="rounded-lg h-7 w-7 text-muted-foreground hover:text-primary"
+              aria-label={dict.guided.plates.title}
+              title={dict.guided.plates.title}
+            >
+              <Disc3 className="h-3.5 w-3.5" aria-hidden />
             </Button>
-            <Button variant="ghost" size="sm" className="h-7 text-xs rounded-lg px-2" onClick={() => setConfirmRemove(false)}>
-              <X className="h-3.5 w-3.5" aria-hidden />
+          )}
+          {confirmRemove ? (
+            <div className="flex items-center gap-1">
+              <Button variant="destructive" size="sm" className="h-7 text-xs rounded-lg px-2" onClick={onRemove}>
+                {dict.common.confirm}
+              </Button>
+              <Button variant="ghost" size="sm" className="h-7 text-xs rounded-lg px-2" onClick={() => setConfirmRemove(false)}>
+                <X className="h-3.5 w-3.5" aria-hidden />
+              </Button>
+            </div>
+          ) : (
+            <Button variant="ghost" size="icon" onClick={() => setConfirmRemove(true)} className="rounded-lg h-7 w-7 text-muted-foreground hover:text-destructive" aria-label={dict.common.delete}>
+              <Trash2 className="h-3.5 w-3.5" aria-hidden />
             </Button>
-          </div>
-        ) : (
-          <Button variant="ghost" size="icon" onClick={() => setConfirmRemove(true)} className="rounded-lg h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive" aria-label={dict.common.delete}>
-            <Trash2 className="h-3.5 w-3.5" aria-hidden />
-          </Button>
-        )}
+          )}
+        </div>
       </div>
 
       {/* header row */}
@@ -713,6 +838,9 @@ function ExerciseCard({ ex, exIdx, dict, onRemove, onAddSet, onRemoveSet, onUpda
           {dict.guided.addSet}
         </button>
       </div>
+
+      {/* plate math dialog (barbell exercises) */}
+      <PlateMathDialog key={plateSeq} open={plateOpen} onOpenChange={setPlateOpen} initialWeight={topWeight} />
     </div>
   );
 }

@@ -6,19 +6,23 @@
  */
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, Trash2, Dumbbell, Flame, Timer as TimerIcon, Trophy, X, Check } from "lucide-react";
+import { ChevronDown, Trash2, Dumbbell, Flame, Timer as TimerIcon, Trophy, X, Check, Repeat } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useAppStore } from "@/stores/app-store";
+import { useAppStore, type GuidedExerciseState } from "@/stores/app-store";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import type { StrengthSessionDTO } from "@/lib/strength";
 import { muscleBadgeClass } from "./exercise-picker";
+import { ExerciseDetailSheet } from "./exercise-detail-sheet";
+
+const DEFAULT_REST = 90;
 
 export function StrengthHistory() {
   const dict = useAppStore((s) => s.dict);
   const locale = useAppStore((s) => s.locale);
+  const startGuidedSession = useAppStore((s) => s.startGuidedSession);
   const qc = useQueryClient();
   const { toast } = useToast();
 
@@ -30,6 +34,31 @@ export function StrengthHistory() {
 
   const [expanded, setExpanded] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<{ key: string; name: string } | null>(null);
+
+  /* openGym-inspired: repeat a past workout today, sets prefilled from last time */
+  const repeatSession = (s: StrengthSessionDTO) => {
+    const hasSets = s.exercises.some((e) => e.sets.length > 0);
+    if (!hasSets) {
+      toast({ title: dict.guided.repeat.emptySets, variant: "destructive" });
+      return;
+    }
+    const exercises: GuidedExerciseState[] = s.exercises.map((e) => ({
+      exerciseKey: e.exerciseKey,
+      name: e.name,
+      muscle: e.muscle,
+      equipment: e.equipment,
+      restSec: DEFAULT_REST,
+      sets: e.sets.map((st) => ({
+        reps: String(st.reps),
+        weightKg: String(st.weightKg),
+        rir: st.rir != null ? String(st.rir) : "",
+        done: false,
+      })),
+    }));
+    startGuidedSession(s.name || "", exercises);
+    toast({ title: dict.guided.repeat.ready });
+  };
 
   const deleteSession = useMutation({
     mutationFn: (id: string) => api(`/api/workouts/session?id=${id}`, { method: "DELETE" }),
@@ -125,7 +154,14 @@ export function StrengthHistory() {
                       {s.exercises.map((e) => (
                         <div key={e.id}>
                           <div className="flex items-center gap-1.5 mb-1">
-                            <p className="text-xs font-semibold">{e.name}</p>
+                            <button
+                              onClick={() => setDetail({ key: e.exerciseKey, name: e.name })}
+                              className="text-xs font-semibold hover:underline underline-offset-2 decoration-primary/50 text-left"
+                              aria-label={`${e.name} — ${dict.guided.detail.openHint}`}
+                              title={dict.guided.detail.openHint}
+                            >
+                              {e.name}
+                            </button>
                             <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-medium ${muscleBadgeClass(e.muscle)}`}>
                               {dict.guided.muscles[e.muscle as keyof typeof dict.guided.muscles] ?? e.muscle}
                             </span>
@@ -160,15 +196,27 @@ export function StrengthHistory() {
                           </Button>
                         </div>
                       ) : (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setConfirmId(s.id)}
-                          className="text-destructive hover:text-destructive h-8 rounded-lg px-2"
-                        >
-                          <Trash2 className="h-3.5 w-3.5 mr-1" aria-hidden />
-                          {dict.guided.deleteSession}
-                        </Button>
+                        <div className="flex items-center gap-2 pt-1">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => repeatSession(s)}
+                            className="h-8 rounded-lg px-2.5 font-medium"
+                            title={dict.guided.repeat.ready}
+                          >
+                            <Repeat className="h-3.5 w-3.5 mr-1" aria-hidden />
+                            {dict.guided.repeat.label}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setConfirmId(s.id)}
+                            className="text-destructive hover:text-destructive h-8 rounded-lg px-2 ml-auto"
+                          >
+                            <Trash2 className="h-3.5 w-3.5 mr-1" aria-hidden />
+                            {dict.guided.deleteSession}
+                          </Button>
+                        </div>
                       )}
                     </div>
                   )}
@@ -177,6 +225,14 @@ export function StrengthHistory() {
             })}
           </ul>
         )}
+
+        <ExerciseDetailSheet
+          exerciseKey={detail?.key ?? null}
+          name={detail?.name ?? ""}
+          onOpenChange={(v) => {
+            if (!v) setDetail(null);
+          }}
+        />
       </CardContent>
     </Card>
   );
