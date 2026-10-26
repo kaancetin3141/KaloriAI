@@ -14,8 +14,12 @@ function authorized(req: Request): boolean {
 
 /** GET /api/push/cron — scheduler status (running, tz, last scan result) */
 export async function GET(req: Request) {
-  if (!authorized(req)) throw new ApiError("UNAUTHORIZED", 401);
-  return Response.json(schedulerStatus());
+  try {
+    if (!authorized(req)) throw new ApiError("UNAUTHORIZED", 401);
+    return Response.json(schedulerStatus());
+  } catch (e) {
+    return errorResponse(e);
+  }
 }
 
 /** POST /api/push/cron — trigger a due-reminder scan (external cron friendly) */

@@ -111,6 +111,10 @@ export function errorResponse(e: unknown) {
   if (e instanceof ZodError) {
     return Response.json({ error: "VALIDATION" }, { status: 400 });
   }
+  // Bozuk/form-encoded gövde → req.json() SyntaxError fırlatır: 500 değil temiz 400
+  if (e instanceof SyntaxError) {
+    return Response.json({ error: "VALIDATION" }, { status: 400 });
+  }
   console.error("[api]", e);
   return Response.json({ error: "SERVER_ERROR" }, { status: 500 });
 }

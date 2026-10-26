@@ -161,13 +161,12 @@ export async function POST(req: Request) {
 
     let url: URL;
     try {
-      url = new URL(parsed.data.url);
-      if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("protocol");
-    } catch {
-      throw new ApiError("VALIDATION", 400);
-    }
-    // SSRF guard: block private hosts
-    if (/^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.|\[::1\])/i.test(url.hostname)) {
+      // TAM SSRF guard'ı POST aşamasında (DNS + link-local/CGNAT/meta hostname):
+      // engellenen hedef için iş AÇILMAZ, kota tüketilmez, istemci anında URL_BLOCKED görür.
+      // (İş içi extractPage → fetchWithGuard redirect atlamlarını yine hop-hop doğrular.)
+      url = await assertPublicHttpUrl(parsed.data.url);
+    } catch (e) {
+      if (e instanceof UrlBlockedError) throw new ApiError("URL_BLOCKED", 400);
       throw new ApiError("VALIDATION", 400);
     }
 

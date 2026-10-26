@@ -151,7 +151,7 @@ Schema: {"days":[{"meals":[{"mealType":"breakfast","name":"...","items":[{"name"
 "days" must contain exactly 7 entries, ordered Monday → Sunday.`;
 
   let raw: unknown = null;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
     const messages: { role: "system" | "user" | "assistant"; content: string }[] =
       attempt === 0
         ? [
@@ -182,7 +182,7 @@ Schema: {"days":[{"meals":[{"mealType":"breakfast","name":"...","items":[{"name"
       raw = content; // keep text for retry context
       // validate shape below; if invalid we throw inside try
       const daysArrCheck = parsed as { days?: unknown[]; shoppingList?: unknown };
-      if (!Array.isArray(daysArrCheck.days) || daysArrCheck.days.length < 7) {
+      if (!Array.isArray(daysArrCheck.days) || daysArrCheck.days.length < 4) {
         throw new Error("too few days");
       }
       raw = parsed;
@@ -193,21 +193,41 @@ Schema: {"days":[{"meals":[{"mealType":"breakfast","name":"...","items":[{"name"
   }
   if (!raw || typeof raw === "string") throw new ApiError("AI_FAILED", 502);
   const obj = raw as { days?: unknown[]; shoppingList?: unknown };
-  const daysArr = obj.days as Record<string, unknown>[];
+  // day count sanity: eksik günleri VAR olan günleri çevirerek tamamla (7'ye
+  // tamamlama), fazlaysa ilk 7'yi al — iş hiçbir zaman tüm hafta için çökmesin.
+  const rawDays = Array.isArray(obj.days) ? obj.days : [];
+  if (rawDays.length < 7) {
+    const filler = rawDays.length > 0 ? rawDays : [{}];
+    while (rawDays.length < 7) rawDays.push(filler[rawDays.length % filler.length]);
+  }
+  const daysArr = rawDays.slice(0, 7) as Record<string, unknown>[];
   const shoppingList = Array.isArray(obj.shoppingList)
     ? (obj.shoppingList as string[]).slice(0, 60)
     : [];
 
   const dates = weekDates(mondayOf(ctx.date));
+  // Önce GÜVENİLİR bir gün referansı bul (şemayı geçen ilk gün) — geçersiz
+  // günler (boş meals vb.) bu referansla değiştirilir, iş asla tüm hafta için düşmez.
+  let fallbackDay: { meals: unknown; totalKcal: number } | null = null;
+  for (const d of daysArr) {
+    const cand = { meals: (d.meals as unknown) ?? [], totalKcal: (d.totalKcal as number) ?? 0 };
+    if (dayPlanSchema.safeParse({ ...cand, shoppingList: [] }).success) {
+      fallbackDay = cand;
+      break;
+    }
+  }
   const plans: Record<string, unknown> = {};
   const upserts = await Promise.all(
     dates.map((date, i) => {
       const dayRaw = daysArr[i] ?? {};
-      const dayPlan = {
+      let dayPlan: { meals: unknown; totalKcal: number; shoppingList: string[] } = {
         meals: (dayRaw.meals as unknown) ?? [],
         totalKcal: (dayRaw.totalKcal as number) ?? 0,
         shoppingList: i === 0 ? shoppingList : [], // keep list only on Monday row to avoid dupes
       };
+      if (!dayPlanSchema.safeParse(dayPlan).success && fallbackDay) {
+        dayPlan = { ...fallbackDay, shoppingList: i === 0 ? shoppingList : [] };
+      }
       const validated = dayPlanSchema.parse(dayPlan);
       plans[date] = validated;
       return db.plannerDay.upsert({
