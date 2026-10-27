@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { requireUser, errorResponse } from "@/lib/auth";
+import { ensureSeedFoodsIfMissing } from "@/lib/food-catalog";
 
 /**
  * Türkçe-duyarlı normalizasyon: SQLite LIKE yalnız ASCII harfleri küçük-büyük
@@ -35,6 +36,12 @@ function likeVariants(q: string): string[] {
 export async function GET(req: Request) {
   try {
     const user = await requireUser();
+
+    // Self-healing (organik tetik): katalogdaki SEED gıda sayısı seed listesinden
+    // azsa eksikleri tamamla — mevcut veritabanlarına sonradan eklenen katalog
+    // gıdaları da ilk aramada görünür. Süreç başına tek kontrol (memoized).
+    await ensureSeedFoodsIfMissing(db);
+
     const url = new URL(req.url);
     const q = (url.searchParams.get("q") || "").trim();
     const limit = Math.min(Number(url.searchParams.get("limit") || 20), 40);

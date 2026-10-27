@@ -439,6 +439,42 @@
   box-shadow: 0 4px 16px oklch(0.3 0.05 150 / 0.09);
 }
 
+/* ============================================================
+   TODAY SCREEN BEAUTY PASS (Task 2-b)
+   kai-arc-pulse : kalori halkası — hedefin son %10'unda nazik nabız
+   kai-bar-in    : makro/su barları — mount'ta soldan büyüme
+   kai-badge-pop : su hedefi rozeti — yay gibi scale-in
+   ============================================================ */
+@keyframes kai-arc-pulse {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 1; }
+}
+.kai-arc-pulse {
+  animation: kai-arc-pulse 2.4s ease-in-out infinite;
+}
+@keyframes kai-bar-in {
+  from { transform: scaleX(0); }
+}
+.kai-bar-in {
+  transform-origin: left;
+  animation: kai-bar-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+@keyframes kai-badge-pop {
+  0% { transform: scale(0.7); }
+  60% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+.kai-badge-pop {
+  animation: kai-badge-pop 0.45s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .kai-arc-pulse,
+  .kai-bar-in,
+  .kai-badge-pop {
+    animation: none;
+  }
+}
+
 /* Gradient emphasis text (hero numbers, ETA dates) */
 .kai-gradient-text {
   background: linear-gradient(135deg, var(--chart-1) 0%, var(--chart-2) 100%);

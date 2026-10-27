@@ -34,6 +34,7 @@ import { runAiJob } from "@/lib/ai-client";
 import { useAppStore, mealLabel } from "@/stores/app-store";
 import { useToast } from "@/hooks/use-toast";
 import { waterTargetMl } from "@/lib/calculations";
+import { useCountUp } from "@/hooks/use-count-up";
 import { FastingCard } from "@/components/kaloriai/fasting-card";
 import { JournalCard } from "@/components/kaloriai/journal-card";
 import type { Dictionary } from "@/lib/i18n";
@@ -66,6 +67,7 @@ import {
 /** Uygulama saat diliminde "bugün" — sunucu gruplamasıyla aynı gün (TZ tutarlı). */
 import { appToday, appDaysAgoStr } from "@/lib/tz";
 import { GapsCard } from "@/components/kaloriai/gaps-card";
+import { ProteinNudgeCard } from "@/components/kaloriai/protein-nudge-card";
 
 /* ---------------- Daily nutrition grade (Cronometer-style carnet) ---------------- */
 interface GradeRow {
@@ -192,7 +194,13 @@ function CalorieRing({
   const remaining = Math.round(Math.abs(budget - consumed));
   const R = 54;
   const C = 2 * Math.PI * R;
-  const pct = budget > 0 ? Math.min(consumed / budget, 1) : 0;
+  // Güzellik katmanı: sayı ve yay aynı rAF akışında dolar (easeOutCubic, spring benzeri)
+  // — hedef değişince (yemek eklendi) önceki değerden yumuşakça geçiş yapar.
+  const animatedConsumed = useCountUp(consumed);
+  const animatedRemaining = useCountUp(remaining);
+  const pct = budget > 0 ? Math.min(animatedConsumed / budget, 1) : 0;
+  // Hedefin son %10'una yaklaşınca (veya aşınca) nazik nabız.
+  const nearGoal = budget > 0 && consumed >= budget * 0.9;
 
   return (
     <div
@@ -208,21 +216,38 @@ function CalorieRing({
           </linearGradient>
         </defs>
         <circle cx="64" cy="64" r={R} fill="none" strokeWidth="10" className="stroke-muted" />
-        <circle
-          cx="64"
-          cy="64"
-          r={R}
-          fill="none"
-          strokeWidth="10"
-          strokeLinecap="round"
-          strokeDasharray={`${C * pct} ${C}`}
-          stroke="url(#kaiRing)"
-          className="transition-[stroke-dasharray] duration-700 ease-out drop-shadow-[0_0_6px_var(--primary)]"
-        />
+        {/* Glow: ilerleme yayının gradyan renkleriyle bulanık ikiz katmanı */}
+        <g className={cn(nearGoal && "kai-arc-pulse")}>
+          <circle
+            cx="64"
+            cy="64"
+            r={R}
+            fill="none"
+            strokeWidth="10"
+            strokeLinecap="round"
+            strokeDasharray={`${C * pct} ${C}`}
+            stroke="url(#kaiRing)"
+            aria-hidden
+            className="opacity-45 blur-[3px]"
+          />
+          <circle
+            cx="64"
+            cy="64"
+            r={R}
+            fill="none"
+            strokeWidth="10"
+            strokeLinecap="round"
+            strokeDasharray={`${C * pct} ${C}`}
+            stroke="url(#kaiRing)"
+            className={
+              over ? "drop-shadow-[0_0_6px_var(--destructive)]" : "drop-shadow-[0_0_6px_var(--primary)]"
+            }
+          />
+        </g>
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
         <span className={cn("text-2xl font-bold tabular-nums drop-shadow-sm", over && "text-destructive")}>
-          {remaining}
+          {Math.round(animatedRemaining)}
         </span>
         <span className="text-[11px] text-muted-foreground">
           {dict.common.kcal} {over ? dict.today.over : dict.today.left}
@@ -237,12 +262,14 @@ function MacroBar({
   value,
   target,
   colorClass,
+  delay = 0,
   dict,
 }: {
   label: string;
   value: number;
   target: number;
   colorClass: string;
+  delay?: number;
   dict: Dictionary;
 }) {
   const pct = target > 0 ? Math.min(Math.round((value / target) * 100), 100) : 0;
@@ -264,8 +291,8 @@ function MacroBar({
         aria-label={label}
       >
         <div
-          className={cn("h-full rounded-full transition-all duration-500", colorClass)}
-          style={{ width: `${pct}%` }}
+          className={cn("kai-bar-in h-full rounded-full transition-[width] duration-500 ease-out", colorClass)}
+          style={{ width: `${pct}%`, animationDelay: `${delay}ms` }}
         />
       </div>
     </div>
@@ -343,6 +370,12 @@ export function TodayScreen() {
     queryFn: () => api<{ days: { date: string; count: number }[] }>("/api/steps?days=1"),
   });
   const todaySteps = stepsQ.data?.days?.[0]?.count ?? 0;
+
+  // Güzellik katmanı: sayı count-up'ları — erken return'lerden ÖNCE koşulsuz hook.
+  const consumedRaw = diaryQ.data?.totals?.kcal ?? 0;
+  const animatedConsumed = useCountUp(consumedRaw);
+  const waterMlRaw = diaryQ.data?.waterMl ?? 0;
+  const animatedWaterMl = useCountUp(waterMlRaw, 700);
 
   const invalidateLogs = () => {
     queryClient.invalidateQueries({ queryKey: ["diary"] });
@@ -473,6 +506,8 @@ export function TodayScreen() {
   const fatTarget = (isTrainingDay ? targets?.trainFat : targets?.fat) ?? 0;
   const waterTarget = waterTargetMl(d.profile?.weightKg);
   const waterPct = Math.min(Math.round((d.waterMl / waterTarget) * 100), 100);
+  // Su kutlama durumu: günlük hedefe ulaşıldı mı?
+  const waterDone = waterTarget > 0 && d.waterMl >= waterTarget;
 
   const mealStats = MEALS.map(({ key }) => {
     const logs = d.logs.filter((l) => l.mealType === key);
@@ -510,7 +545,7 @@ export function TodayScreen() {
 
       {/* Hero calorie card */}
       <motion.div {...fade(1)}>
-        <Card className="p-6">
+        <Card className="kai-card-hover p-6">
           <div className="flex flex-col items-center gap-6 sm:flex-row sm:gap-8">
             <CalorieRing consumed={consumed} budget={budget} dict={dict} />
             <div className="w-full flex-1 space-y-4">
@@ -532,7 +567,7 @@ export function TodayScreen() {
               <div className="flex flex-wrap items-center gap-2">
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary">
                   <Utensils className="h-3.5 w-3.5" aria-hidden />
-                  {dict.today.eaten}: {Math.round(consumed)} {dict.common.kcal}
+                  {dict.today.eaten}: {Math.round(animatedConsumed)} {dict.common.kcal}
                 </span>
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-700 dark:text-amber-400">
                   <Flame className="h-3.5 w-3.5" aria-hidden />
@@ -560,21 +595,24 @@ export function TodayScreen() {
                   label={dict.onboarding.protein}
                   value={d.totals?.protein ?? 0}
                   target={proteinTarget}
-                  colorClass="bg-primary"
+                  colorClass="bg-gradient-to-r from-chart-1 to-chart-1/60"
+                  delay={80}
                   dict={dict}
                 />
                 <MacroBar
                   label={dict.onboarding.carbs}
                   value={d.totals?.carbs ?? 0}
                   target={carbsTarget}
-                  colorClass="bg-amber-500"
+                  colorClass="bg-gradient-to-r from-chart-2 to-chart-2/60"
+                  delay={160}
                   dict={dict}
                 />
                 <MacroBar
                   label={dict.onboarding.fat}
                   value={d.totals?.fat ?? 0}
                   target={fatTarget}
-                  colorClass="bg-rose-500"
+                  colorClass="bg-gradient-to-r from-chart-4 to-chart-4/60"
+                  delay={240}
                   dict={dict}
                 />
               </div>
@@ -583,6 +621,18 @@ export function TodayScreen() {
         </Card>
       </motion.div>
 
+      {/* Antrenman sonrası protein hatırlatması — bugün antrenmanı olan ve hedefe ulaşmamışsa */}
+      <ProteinNudgeCard
+        date={date}
+        totals={d.totals}
+        proteinTarget={proteinTarget}
+        workouts={d.workouts}
+        weightKg={d.profile?.weightKg}
+        dict={dict}
+        locale={locale}
+        index={2}
+      />
+
       {/* Akıllı eksik analizi — kural tabanlı, anında, tek dokunuşla tamamla */}
       <GapsCard />
 
@@ -590,7 +640,7 @@ export function TodayScreen() {
       <motion.section {...fade(2)} aria-label={dict.today.takePhoto} className="space-y-3">
         <Button
           onClick={() => setCaptureOpen(true)}
-          className="h-auto w-full flex-col items-center gap-1 rounded-2xl bg-gradient-to-br from-primary to-primary/80 py-4 shadow-md shadow-primary/20 transition-all hover:shadow-lg hover:shadow-primary/25 active:scale-[0.98]"
+          className="h-auto w-full flex-col items-center gap-1 rounded-2xl bg-gradient-to-br from-primary to-primary/80 py-4 shadow-md shadow-primary/20 transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-primary/25 active:scale-[0.98]"
         >
           <Camera className="h-6 w-6" aria-hidden />
           <span className="text-base font-semibold">{dict.today.takePhoto}</span>
@@ -600,7 +650,7 @@ export function TodayScreen() {
           <Button
             variant="outline"
             onClick={() => setVoiceOpen(true)}
-            className="kai-pressable h-auto min-h-[44px] flex-col gap-1 rounded-2xl py-3"
+            className="kai-pressable h-auto min-h-[44px] flex-col gap-1 rounded-2xl py-3 hover:-translate-y-0.5"
           >
             <Mic className="h-5 w-5 text-destructive" aria-hidden />
             <span className="text-sm font-medium">{dict.voice.title}</span>
@@ -608,7 +658,7 @@ export function TodayScreen() {
           <Button
             variant="outline"
             onClick={() => setTextOpen(true)}
-            className="kai-pressable h-auto min-h-[44px] flex-col gap-1 rounded-2xl py-3"
+            className="kai-pressable h-auto min-h-[44px] flex-col gap-1 rounded-2xl py-3 hover:-translate-y-0.5"
           >
             <PenLine className="h-5 w-5 text-primary" aria-hidden />
             <span className="text-sm font-medium">{dict.today.textEntry}</span>
@@ -616,7 +666,7 @@ export function TodayScreen() {
           <Button
             variant="outline"
             onClick={() => setQuickOpen(true)}
-            className="kai-pressable h-auto min-h-[44px] flex-col gap-1 rounded-2xl py-3"
+            className="kai-pressable h-auto min-h-[44px] flex-col gap-1 rounded-2xl py-3 hover:-translate-y-0.5"
           >
             <Zap className="h-5 w-5 text-amber-500" aria-hidden />
             <span className="text-sm font-medium">{dict.today.quickAdd}</span>
@@ -629,7 +679,7 @@ export function TodayScreen() {
             onClick={() => copyYesterday.mutate()}
             disabled={copyYesterday.isPending}
             aria-label={dict.today.copyYesterday}
-            className="kai-pressable h-auto min-h-[44px] flex-col gap-1 rounded-2xl py-3"
+            className="kai-pressable h-auto min-h-[44px] flex-col gap-1 rounded-2xl py-3 hover:-translate-y-0.5"
           >
             <Copy
               className={`h-5 w-5 text-emerald-500 ${copyYesterday.isPending ? "animate-pulse" : ""}`}
@@ -679,15 +729,30 @@ export function TodayScreen() {
 
       {/* Water */}
       <motion.div {...fade(4)}>
-        <Card className="kai-card-hover p-4">
+        <Card className={cn("kai-card-hover p-4", waterDone && "ring-1 ring-emerald-500/40")}>
           <div className="flex items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2.5">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10">
-                <Droplets className="h-4.5 w-4.5 text-primary" aria-hidden />
+              <span
+                className={cn(
+                  "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl",
+                  waterDone ? "kai-badge-pop bg-emerald-500/15" : "bg-primary/10"
+                )}
+              >
+                <Droplets
+                  className={cn(
+                    "h-4.5 w-4.5",
+                    waterDone ? "text-emerald-600 dark:text-emerald-400" : "text-primary"
+                  )}
+                  aria-hidden
+                />
               </span>
               <div className="min-w-0">
                 <p className="text-sm font-semibold">{dict.today.water}</p>
-                {waterPct < 100 && (
+                {waterDone ? (
+                  <p className="truncate text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                    {dict.steps.reached}
+                  </p>
+                ) : (
                   <p className="truncate text-[11px] text-muted-foreground">{dict.today.waterSub}</p>
                 )}
               </div>
@@ -699,7 +764,7 @@ export function TodayScreen() {
                 onClick={() => waterAdd.mutate(250)}
                 disabled={waterAdd.isPending}
                 aria-label={dict.today.addWater}
-                className="min-h-[44px] shrink-0 gap-1.5 rounded-full sm:min-h-9"
+                className="min-h-[44px] shrink-0 gap-1.5 rounded-full transition-transform duration-150 hover:-translate-y-0.5 active:scale-95 sm:min-h-9"
               >
                 <GlassWater className="h-4 w-4" aria-hidden />
                 +250 {dict.common.ml}
@@ -750,12 +815,17 @@ export function TodayScreen() {
               aria-label={dict.today.water}
             >
               <div
-                className="h-full rounded-full bg-gradient-to-r from-chart-2 to-primary transition-all duration-500"
-                style={{ width: `${waterPct}%` }}
+                className={cn(
+                  "kai-bar-in h-full rounded-full transition-all duration-500 ease-out",
+                  waterDone
+                    ? "bg-gradient-to-r from-emerald-500 to-emerald-400"
+                    : "bg-gradient-to-r from-chart-2 to-primary"
+                )}
+                style={{ width: `${waterPct}%`, animationDelay: "120ms" }}
               />
             </div>
             <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-              {d.waterMl}/{waterTarget} {dict.common.ml}
+              {Math.round(animatedWaterMl)}/{waterTarget} {dict.common.ml}
             </span>
           </div>
         </Card>

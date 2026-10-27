@@ -920,6 +920,19 @@ export const tr = {
     aiData: "AI analizleri: fotoğrafın vision modeline gönderilir, ham analiz sonucu hesabında saklanır ve dilediğin an silinebilir.",
   },
 
+  proteinNudge: {
+    title: "Antrenman bitti — protein zamanı",
+    subtitle: "Kaslarının onarılması için bugünkü protein hedefini tamamla",
+    postTarget: "Antrenman sonrası hedef",
+    postTargetHint: "0.4 g/kg vücut ağırlığı",
+    dailyProgress: "Günlük protein ilerlemesi",
+    remaining: "kaldı",
+    quickAdd: "Hızlı ekle",
+    dismiss: "Kapat",
+    added: "deftere eklendi",
+    goalReached: "Protein hedefine ulaştın 💪",
+  },
+
   shortcuts: {
     title: "Klavye Kısayolları",
     subtitle: "Uygulamayı parmaklarınızın ucunda gezinin",

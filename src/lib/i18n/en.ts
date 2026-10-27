@@ -921,6 +921,19 @@ export const en: Dictionary = {
     storage: "Data is stored on the server; passwords are irreversibly hashed.",
     aiData: "AI analyses: your photo is sent to a vision model, the raw result is stored on your account and can be deleted anytime.",
   },
+  proteinNudge: {
+    title: "Workout done — time for protein",
+    subtitle: "Complete today's protein goal to repair your muscles",
+    postTarget: "Post-workout target",
+    postTargetHint: "0.4 g/kg body weight",
+    dailyProgress: "Daily protein progress",
+    remaining: "remaining",
+    quickAdd: "Quick add",
+    dismiss: "Dismiss",
+    added: "added to diary",
+    goalReached: "Protein goal reached 💪",
+  },
+
   shortcuts: {
     title: "Keyboard Shortcuts",
     subtitle: "Navigate the app at your fingertips",
