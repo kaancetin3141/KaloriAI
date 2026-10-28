@@ -13,6 +13,11 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
+  // 4GB sandbox'ta 8 servis birlikte çalışıyor — Turbopack bellek tavanını
+  // sabitle (gnc-erp next.config.ts ile aynı desen).
+  experimental: {
+    turbopackMemoryLimit: 512,
+  },
   async headers() {
     return [
       {
