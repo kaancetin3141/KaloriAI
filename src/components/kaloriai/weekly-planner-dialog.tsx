@@ -31,6 +31,7 @@ import { useToast } from "@/hooks/use-toast";
 import { ApiError, api } from "@/lib/api";
 import { runAiJob } from "@/lib/ai-client";
 import { useAppStore } from "@/stores/app-store";
+import { ShoppingListDialog } from "@/components/kaloriai/shopping-list-dialog";
 
 const PaywallDialog = nextDynamic(
   () => import("@/components/kaloriai/paywall-dialog").then((m) => ({ default: m.PaywallDialog })),
@@ -39,7 +40,7 @@ const PaywallDialog = nextDynamic(
 
 const fmtDate = (d: Date) => d.toLocaleDateString("en-CA");
 
-interface PlannerItem {
+export interface PlannerItem {
   name: string;
   grams: number;
   kcal: number;
@@ -47,12 +48,12 @@ interface PlannerItem {
   carbs: number;
   fat: number;
 }
-interface PlannerMeal {
+export interface PlannerMeal {
   mealType: string;
   name: string;
   items: PlannerItem[];
 }
-interface PlannerPlan {
+export interface PlannerPlan {
   meals: PlannerMeal[];
   totalKcal: number;
   shoppingList: string[];
@@ -77,6 +78,7 @@ export function WeeklyPlannerDialog({ open, onClose }: { open: boolean; onClose:
   const [weekOffset, setWeekOffset] = useState(0); // 0 = current week
   const [paywallOpen, setPaywallOpen] = useState(false);
   const [addingDay, setAddingDay] = useState<string | null>(null);
+  const [shopOpen, setShopOpen] = useState(false);
 
   const weekOf = useMemo(() => {
     const d = new Date();
@@ -185,19 +187,31 @@ export function WeeklyPlannerDialog({ open, onClose }: { open: boolean; onClose:
     <>
       <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
         <DialogContent className="kai-scroll max-h-[92vh] overflow-y-auto sm:max-w-lg lg:max-w-3xl">
-          <DialogHeader>
-            <DialogTitle className="flex flex-wrap items-center gap-2">
-              <CalendarDays className="h-5 w-5 text-primary" aria-hidden />
-              {dict.planner.weekView}
-              <Badge
-                variant="outline"
-                className="gap-1 border-amber-400/40 bg-amber-400/10 text-[10px] text-amber-600 dark:text-amber-400"
-              >
-                <Sparkles className="h-3 w-3" aria-hidden />
-                Premium
-              </Badge>
-            </DialogTitle>
-            <DialogDescription>{dict.planner.weekViewSub}</DialogDescription>
+          <DialogHeader className="flex flex-row items-start justify-between gap-2 space-y-0">
+            <div>
+              <DialogTitle className="flex flex-wrap items-center gap-2">
+                <CalendarDays className="h-5 w-5 text-primary" aria-hidden />
+                {dict.planner.weekView}
+                <Badge
+                  variant="outline"
+                  className="gap-1 border-amber-400/40 bg-amber-400/10 text-[10px] text-amber-600 dark:text-amber-400"
+                >
+                  <Sparkles className="h-3 w-3" aria-hidden />
+                  Premium
+                </Badge>
+              </DialogTitle>
+              <DialogDescription>{dict.planner.weekViewSub}</DialogDescription>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1 rounded-full active:scale-95"
+              onClick={() => setShopOpen(true)}
+              aria-label={dict.shoppingList.open}
+            >
+              <ShoppingBasket className="h-4 w-4" aria-hidden />
+              <span className="hidden sm:inline">{dict.shoppingList.open}</span>
+            </Button>
           </DialogHeader>
 
           {/* Week navigation */}
@@ -420,6 +434,14 @@ export function WeeklyPlannerDialog({ open, onClose }: { open: boolean; onClose:
       </Dialog>
 
       <PaywallDialog open={paywallOpen} onClose={() => setPaywallOpen(false)} />
+
+      {/* Alışveriş listesi — haftalık plan verisi zaten yüklü → prop olarak geç */}
+      <ShoppingListDialog
+        open={shopOpen}
+        onClose={() => setShopOpen(false)}
+        plans={plans}
+        loading={weekQuery.isLoading}
+      />
     </>
   );
 }

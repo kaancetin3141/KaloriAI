@@ -82,6 +82,8 @@ export interface Profile {
   userType?: string;
   dietPreference?: string;
   allergens?: string;
+  /** comma separated canonical tokens: diabetes,hypertension,pcos,cholesterol,thyroid,ibs */
+  healthConditions?: string;
   formula?: string;
   onboarded?: boolean;
   trainingDayTarget?: boolean;
@@ -182,4 +184,24 @@ export interface Reminder {
   type: string;
   time: string;
   enabled: boolean;
+}
+
+/** One day cell of the month calendar (/api/calendar). */
+export interface CalendarDay {
+  date: string;
+  kcal: number;
+  protein: number;
+  waterMl: number;
+  workoutMin: number;
+  fasting: boolean;
+  /** any meal log OR water OR workout on that (non-future) day */
+  logged: boolean;
+}
+
+export interface CalendarResponse {
+  month: string;
+  days: CalendarDay[];
+  targetKcal: number;
+  trainTargetKcal: number | null;
+  isAthlete: boolean;
 }

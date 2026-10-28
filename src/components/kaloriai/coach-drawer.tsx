@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
-import { Loader2, Send, Sparkles } from "lucide-react";
+import { HeartPulse, Loader2, Send, Sparkles } from "lucide-react";
 import { runAiJob } from "@/lib/ai-client";
 import { useAppStore } from "@/stores/app-store";
 import { Button } from "@/components/ui/button";
@@ -15,12 +15,27 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { Badge } from "@/components/ui/badge";
+import { api } from "@/lib/api";
+import type { Dictionary } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 interface ChatMsg {
   role: "assistant" | "user";
   content: string;
 }
+
+interface HealthProfileData {
+  conditions: string[];
+  allergies: string[];
+  dietPreference: string;
+}
+
+/** Bilinmeyen token (onboarding'in serbest metni) → ham metin gösterilir */
+const condLabel = (dict: Dictionary, key: string): string =>
+  dict.healthProfile.conditionsList[key as keyof typeof dict.healthProfile.conditionsList] ?? key;
+const allergyLabel = (dict: Dictionary, key: string): string =>
+  dict.healthProfile.allergiesList[key as keyof typeof dict.healthProfile.allergiesList] ?? key;
 
 function useIsDesktop() {
   const [isDesktop, setIsDesktop] = useState(false);
@@ -59,6 +74,17 @@ export function CoachDrawer() {
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const isDesktop = useIsDesktop();
+
+  /* Sağlık notları — küçük ve önbellekli (koç her açılışta istek atmasın) */
+  const healthQ = useQuery({
+    queryKey: ["healthProfile"],
+    queryFn: () => api<HealthProfileData>("/api/health-profile"),
+    staleTime: 5 * 60_000,
+  });
+  const healthNotes = [...(healthQ.data?.conditions ?? []), ...(healthQ.data?.allergies ?? [])];
+  const noteLabels = healthNotes.map((t) =>
+    (healthQ.data?.conditions ?? []).includes(t) ? condLabel(dict, t) : allergyLabel(dict, t)
+  );
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -109,6 +135,24 @@ export function CoachDrawer() {
           </SheetTitle>
           <SheetDescription>{dict.coach.disclaimer}</SheetDescription>
         </SheetHeader>
+
+        {/* Sağlık notları — AI koça iletilir (yalnız doluysa) */}
+        {healthNotes.length > 0 && (
+          <div className="border-b bg-amber-500/5 px-4 py-2.5">
+            <Badge
+              variant="secondary"
+              title={noteLabels.join(" · ")}
+              className="max-w-full gap-1 border-amber-500/30 bg-amber-500/10 text-xs font-medium text-amber-700 dark:text-amber-400"
+            >
+              <HeartPulse className="h-3 w-3 shrink-0" aria-hidden />
+              <span className="truncate">
+                {noteLabels.slice(0, 3).join(" · ")}
+                {noteLabels.length > 3 ? ` +${noteLabels.length - 3}` : ""}
+              </span>
+            </Badge>
+            <p className="mt-1 text-xs text-muted-foreground">{dict.healthProfile.coachNote}</p>
+          </div>
+        )}
 
         <div
           ref={scrollRef}

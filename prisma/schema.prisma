@@ -69,7 +69,8 @@ model Profile {
   activityLevel      String   @default("moderate") // sedentary | light | moderate | active | very_active
   userType           String   @default("general") // general | athlete
   dietPreference     String   @default("any") // any | vegetarian | vegan | gluten_free | halal
-  allergens          String   @default("") // comma separated
+  allergens          String   @default("") // comma separated canonical tokens: gluten,lactose,nuts,peanut,egg,fish,shellfish,soy,sesame
+  healthConditions   String   @default("") // comma separated: diabetes,hypertension,pcos,cholesterol,thyroid,ibs
   formula            String   @default("mifflin") // mifflin | katch
   onboarded          Boolean  @default(false)
   consentAt          DateTime?

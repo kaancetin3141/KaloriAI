@@ -75,6 +75,7 @@ import { PlannerDialog } from "@/components/kaloriai/planner-dialog";
 import { RecipeDialog } from "@/components/kaloriai/recipe-dialog";
 import { WeeklyPlannerDialog } from "@/components/kaloriai/weekly-planner-dialog";
 import { MicronutrientsCard } from "@/components/kaloriai/micros-card";
+import { CalendarDialog } from "@/components/kaloriai/calendar-dialog";
 
 /** Local YYYY-MM-DD */
 const fmtDate = (d = new Date()) => d.toLocaleDateString("en-CA");
@@ -422,6 +423,7 @@ export function DiaryScreen() {
   const [editItem, setEditItem] = useState<LogItem | null>(null);
   const [waterCustomOpen, setWaterCustomOpen] = useState(false);
   const [waterCustomMl, setWaterCustomMl] = useState("");
+  const [calOpen, setCalOpen] = useState(false);
 
   const diary = useQuery({
     queryKey: ["diary", date],
@@ -616,6 +618,15 @@ export function DiaryScreen() {
             aria-label={dict.common.next}
           >
             <ChevronRight className="h-5 w-5" aria-hidden />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-11 w-11 shrink-0 rounded-lg"
+            onClick={() => setCalOpen(true)}
+            aria-label={dict.calendar.open}
+          >
+            <CalendarDays className="h-5 w-5" aria-hidden />
           </Button>
         </div>
       </header>
@@ -1095,6 +1106,7 @@ export function DiaryScreen() {
       <PlannerDialog open={plannerOpen} onClose={() => setPlannerOpen(false)} />
       <WeeklyPlannerDialog open={weekPlannerOpen} onClose={() => setWeekPlannerOpen(false)} />
       <RecipeDialog open={recipesOpen} onClose={() => setRecipesOpen(false)} date={date} mealType={sheetMeal ?? "snacks"} />
+      <CalendarDialog open={calOpen} onOpenChange={setCalOpen} selectedDate={date} onPick={(d) => setDate(d)} />
     </div>
   );
 }

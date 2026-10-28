@@ -68,6 +68,8 @@ import {
 import { appToday, appDaysAgoStr } from "@/lib/tz";
 import { GapsCard } from "@/components/kaloriai/gaps-card";
 import { ProteinNudgeCard } from "@/components/kaloriai/protein-nudge-card";
+import { ZenScoreCard } from "@/components/kaloriai/zen-score-card";
+import { WhatToEatCard } from "@/components/kaloriai/what-to-eat-card";
 
 /* ---------------- Daily nutrition grade (Cronometer-style carnet) ---------------- */
 interface GradeRow {
@@ -631,6 +633,30 @@ export function TodayScreen() {
         dict={dict}
         locale={locale}
         index={2}
+      />
+
+      {/* Zen Puanı — dengeli günü ödüllendiren saf istemci skoru (API yok) */}
+      <ZenScoreCard
+        totals={d.totals}
+        targetKcal={budget}
+        targetProtein={proteinTarget}
+        waterMl={d.waterMl}
+        waterTargetMl={waterTarget}
+        loggedMealTypes={mealStats.filter((m) => m.items > 0).length}
+        dict={dict}
+        index={2}
+      />
+
+      {/* Şimdi ne yesem? — kalan kalori/proteine göre AI öğün önerileri */}
+      <WhatToEatCard
+        date={date}
+        consumedKcal={consumed}
+        targetKcal={budget}
+        consumedProtein={d.totals?.protein ?? 0}
+        targetProtein={proteinTarget}
+        dict={dict}
+        locale={locale}
+        index={3}
       />
 
       {/* Akıllı eksik analizi — kural tabanlı, anında, tek dokunuşla tamamla */}

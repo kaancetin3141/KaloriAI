@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   ChefHat,
   Plus,
+  Refrigerator,
   Trash2,
   Users,
   X,
@@ -31,6 +32,8 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { api, ApiError } from "@/lib/api";
 import { runAiJob } from "@/lib/ai-client";
 import type { FoodItem } from "@/lib/types";
@@ -113,6 +116,23 @@ interface ImportDraft {
   items: ImportDraftItem[];
 }
 
+interface FridgeIngredient {
+  name: string;
+  grams: number;
+}
+
+interface FridgeRecipe {
+  name: string;
+  servings: number;
+  kcalPerServing: number;
+  steps: string[];
+  ingredients: FridgeIngredient[];
+}
+
+interface FridgeResponse {
+  recipes: FridgeRecipe[];
+}
+
 interface ImportResponse {
   ok: boolean;
   importId: string;
@@ -154,7 +174,7 @@ export function RecipeDialog({
   const qc = useQueryClient();
   const isMobile = useIsMobile();
 
-  const [mode, setMode] = useState<"list" | "create" | "import">("list");
+  const [mode, setMode] = useState<"list" | "create" | "import" | "fridge">("list");
   const [search, setSearch] = useState("");
   const [results, setResults] = useState<FoodItem[]>([]);
   const [searching, setSearching] = useState(false);
@@ -171,6 +191,14 @@ export function RecipeDialog({
   const [sourceTitle, setSourceTitle] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("");
   const [draftServings, setDraftServings] = useState("4");
+
+  // --- Buzdolabı (fridge recipes) durumu ---
+  const [fridgeInput, setFridgeInput] = useState("");
+  const [fridgeItems, setFridgeItems] = useState<string[]>([]);
+  const [fridgeVegan, setFridgeVegan] = useState(false);
+  const [fridgeRecipes, setFridgeRecipes] = useState<FridgeRecipe[] | null>(null);
+  const [fridgeError, setFridgeError] = useState<string | null>(null);
+  const [fridgeSaved, setFridgeSaved] = useState<string[]>([]);
 
   const recipesQuery = useQuery({
     queryKey: ["recipes"],
@@ -237,6 +265,39 @@ export function RecipeDialog({
     setDraftServings("4");
   };
 
+  const resetFridge = () => {
+    setFridgeInput("");
+    setFridgeItems([]);
+    setFridgeVegan(false);
+    setFridgeRecipes(null);
+    setFridgeError(null);
+    setFridgeSaved([]);
+  };
+
+  // Textarea satırlarını (her satır = bir malzeme) çiplere çevir: boş satırlar
+  // atılır, yenilenir, var olanlarla (büyük/küçük harf duyarsız) birleştirilir, 15'te kesilir.
+  const addFridgeItems = () => {
+    const lines = fridgeInput
+      .split(/\r?\n/)
+      .map((l) => l.trim().replace(/\s+/g, " "))
+      .filter((l) => l.length > 0 && l.length <= 60);
+    if (lines.length === 0) return;
+    setFridgeItems((prev) => {
+      const seen = new Set(prev.map((p) => p.toLocaleLowerCase(locale)));
+      const next = [...prev];
+      for (const l of lines) {
+        if (next.length >= 15) break;
+        const key = l.toLocaleLowerCase(locale);
+        if (!seen.has(key)) {
+          next.push(l);
+          seen.add(key);
+        }
+      }
+      return next;
+    });
+    setFridgeInput("");
+  };
+
   const analyzeImport = useMutation({
     // Kısa POST + yoklama — sayfa çekme + AI turu bağlantıyı meşgul etmez.
     mutationFn: () =>
@@ -291,6 +352,57 @@ export function RecipeDialog({
       void qc.invalidateQueries({ queryKey: ["recipes"] });
     },
     onError: () => toast({ description: dict.common.error, variant: "destructive" }),
+  });
+
+  // Buzdolabı: AI'dan 2 tarif önerisi al (kısa POST + yoklama).
+  const generateFridge = useMutation({
+    mutationFn: () =>
+      runAiJob<FridgeResponse>("/api/ai/fridge-recipes", {
+        body: { ingredients: fridgeItems.slice(0, 15), locale, vegan: fridgeVegan },
+      }),
+    onSuccess: (res) => {
+      setFridgeRecipes(res.recipes);
+      setFridgeSaved([]);
+      setFridgeError(null);
+    },
+    onError: () => setFridgeError(dict.fridge.failed),
+  });
+
+  // Buzdolabı kaydetme — import'ın sunucu tarafı eşleştirmesinin İSTEMCİ uyarlaması:
+  // malzemeleri ad üzerinden /api/foods/search ile eşleştir (protein-nudge/what-to-eat
+  // deseni) ve mevcut POST /api/recipes'e (foodId + grams) gönder — en az yeni kod.
+  const saveFridgeRecipe = useMutation({
+    mutationFn: async (r: FridgeRecipe) => {
+      const found = await Promise.all(
+        r.ingredients.map(async (ing) => {
+          try {
+            const res = await api<{ foods: FoodItem[] }>(
+              `/api/foods/search?q=${encodeURIComponent(ing.name)}&limit=5`,
+              { timeoutMs: 15_000 }
+            );
+            const f = res.foods[0];
+            return f ? { foodId: f.id, grams: Math.round(ing.grams) } : null;
+          } catch {
+            return null;
+          }
+        })
+      );
+      const items = found.filter((x): x is { foodId: string; grams: number } => x !== null);
+      if (items.length === 0) throw new ApiError("NOT_FOUND", 404);
+      return api<{ ok: boolean; recipeId: string }>("/api/recipes", {
+        body: {
+          name: r.name.trim().slice(0, 120),
+          servings: Math.min(Math.max(Math.round(r.servings) || 1, 1), 20),
+          items,
+        },
+      });
+    },
+    onSuccess: (_data, r) => {
+      toast({ description: dict.diary.recipeCreated });
+      setFridgeSaved((prev) => (prev.includes(r.name) ? prev : [...prev, r.name]));
+      void qc.invalidateQueries({ queryKey: ["recipes"] });
+    },
+    onError: () => toast({ description: dict.fridge.failed, variant: "destructive" }),
   });
 
   const importTotals = useMemo(() => {
@@ -373,6 +485,21 @@ export function RecipeDialog({
         <DialogDescription className="text-xs">{dict.diary.recipesSub}</DialogDescription>
       </div>
       <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        {mode === "list" && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1 rounded-full active:scale-95"
+            onClick={() => {
+              resetFridge();
+              setMode("fridge");
+            }}
+            aria-label={dict.fridge.tabLabel}
+          >
+            <Refrigerator className="h-4 w-4" aria-hidden />
+            <span className="hidden sm:inline">{dict.fridge.tabLabel}</span>
+          </Button>
+        )}
         {mode === "list" && (
           <Button
             variant="outline"
@@ -697,6 +824,178 @@ export function RecipeDialog({
                 )}
                 {dict.diary.recipeImportSave}
               </Button>
+            </motion.div>
+          )}
+        </div>
+      ) : mode === "fridge" ? (
+        <div className="flex h-full min-h-0 flex-col gap-3">
+          <div className="space-y-1">
+            <p className="flex items-center gap-1.5 text-sm font-bold">
+              <Refrigerator className="h-4 w-4 text-primary" aria-hidden />
+              {dict.fridge.title}
+            </p>
+            <p className="text-[11px] leading-snug text-muted-foreground">{dict.fridge.subtitle}</p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Textarea
+              id="fridge-ingredients"
+              value={fridgeInput}
+              onChange={(e) => {
+                setFridgeInput(e.target.value);
+                setFridgeError(null);
+              }}
+              placeholder={dict.fridge.placeholder}
+              rows={3}
+              className="min-h-16 resize-none text-xs"
+              disabled={generateFridge.isPending}
+              aria-label={dict.fridge.placeholder}
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="min-h-9 gap-1 active:scale-95"
+                onClick={addFridgeItems}
+                disabled={generateFridge.isPending || fridgeInput.trim().length === 0}
+              >
+                <Plus className="h-3.5 w-3.5" aria-hidden />
+                {dict.fridge.add}
+              </Button>
+              <label className="ml-auto flex min-h-9 cursor-pointer items-center gap-2 text-[11px] text-muted-foreground">
+                <Switch
+                  checked={fridgeVegan}
+                  onCheckedChange={setFridgeVegan}
+                  disabled={generateFridge.isPending}
+                  aria-label={dict.fridge.veganHint}
+                />
+                {dict.fridge.veganHint}
+              </label>
+            </div>
+          </div>
+
+          {fridgeItems.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {fridgeItems.map((it, idx) => (
+                <Badge key={`${it}-${idx}`} variant="secondary" className="h-7 gap-1 rounded-full pl-2.5 pr-1 text-xs font-normal">
+                  {it}
+                  <button
+                    type="button"
+                    className="flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                    onClick={() => setFridgeItems((prev) => prev.filter((_, i) => i !== idx))}
+                    aria-label={`${dict.common.delete} ${it}`}
+                    disabled={generateFridge.isPending}
+                  >
+                    <X className="h-3 w-3" aria-hidden />
+                  </button>
+                </Badge>
+              ))}
+            </div>
+          )}
+
+          {fridgeItems.length < 2 && !generateFridge.isPending && (
+            <p role="note" className="text-[11px] text-muted-foreground">
+              {dict.fridge.minTwo}
+            </p>
+          )}
+
+          {fridgeError && (
+            <p role="alert" className="text-xs text-destructive">
+              {fridgeError}
+            </p>
+          )}
+
+          <Button
+            className="w-full min-h-11 gap-1.5 active:scale-[0.98]"
+            onClick={() => generateFridge.mutate()}
+            disabled={generateFridge.isPending || fridgeItems.length < 2}
+          >
+            {generateFridge.isPending ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                {dict.fridge.generating}
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-4 w-4" aria-hidden />
+                {dict.fridge.generate}
+              </>
+            )}
+          </Button>
+
+          {generateFridge.isPending && (
+            <div className="space-y-2" aria-busy="true" aria-label={dict.fridge.generating}>
+              {[1, 2].map((i) => (
+                <Skeleton key={i} className="h-44 w-full rounded-xl" />
+              ))}
+            </div>
+          )}
+
+          {fridgeRecipes && !generateFridge.isPending && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="kai-scroll min-h-0 flex-1 space-y-3 overflow-y-auto pr-1"
+            >
+              <p className="flex flex-wrap items-center gap-1.5 text-xs font-semibold">
+                <Sparkles className="h-3.5 w-3.5 text-primary" aria-hidden />
+                {dict.fridge.results}
+                <Badge variant="outline" className="gap-1 rounded-full text-[10px] font-normal text-muted-foreground">
+                  <Refrigerator className="h-3 w-3" aria-hidden />
+                  {dict.fridge.fromFridge}
+                </Badge>
+              </p>
+
+              {fridgeRecipes.map((r, i) => {
+                const saved = fridgeSaved.includes(r.name);
+                const saving = saveFridgeRecipe.isPending && saveFridgeRecipe.variables === r;
+                return (
+                  <div key={`${r.name}-${i}`} className="rounded-xl border bg-card p-3">
+                    <p className="text-sm font-semibold">{r.name}</p>
+                    <p className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+                      <Users className="h-3 w-3" aria-hidden />
+                      {r.servings} · {dict.diary.recipePerServing}:{" "}
+                      <strong className="tabular-nums">{r.kcalPerServing}</strong> {dict.common.kcal}
+                    </p>
+
+                    <ol className="mt-2 space-y-1">
+                      {r.steps.map((s, j) => (
+                        <li key={j} className="flex gap-2 text-[11px] leading-snug text-muted-foreground">
+                          <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[9px] font-bold text-primary tabular-nums">
+                            {j + 1}
+                          </span>
+                          <span className="min-w-0 flex-1">{s}</span>
+                        </li>
+                      ))}
+                    </ol>
+
+                    <div className="mt-2 space-y-1 rounded-lg bg-muted/60 p-2">
+                      {r.ingredients.map((ing, j) => (
+                        <div key={j} className="flex items-center justify-between gap-2 text-[11px]">
+                          <span className="truncate text-muted-foreground">{ing.name}</span>
+                          <span className="shrink-0 tabular-nums">{ing.grams} g</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <Button
+                      size="sm"
+                      className="mt-2.5 min-h-9 w-full gap-1.5 active:scale-[0.98]"
+                      onClick={() => saveFridgeRecipe.mutate(r)}
+                      disabled={saved || saving}
+                    >
+                      {saving ? (
+                        <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                      ) : saved ? (
+                        <Check className="h-4 w-4" aria-hidden />
+                      ) : (
+                        <Plus className="h-4 w-4" aria-hidden />
+                      )}
+                      {saved ? dict.diary.recipeCreated : dict.fridge.saveRecipe}
+                    </Button>
+                  </div>
+                );
+              })}
             </motion.div>
           )}
         </div>

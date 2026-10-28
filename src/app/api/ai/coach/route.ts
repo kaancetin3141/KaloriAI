@@ -25,13 +25,14 @@ export async function POST(req: Request) {
     if (!parsed.success) throw new ApiError("VALIDATION", 400);
 
     const today = appToday();
-    const [targets, logs, history] = await Promise.all([
+    const [targets, logs, history, profile] = await Promise.all([
       db.targets.findUnique({ where: { userId: user.id } }),
       db.mealLog.findMany({
         where: { userId: user.id, date: today, deletedAt: null, isTemplate: false },
         include: { items: true },
       }),
       db.aiChatMessage.findMany({ where: { userId: user.id }, orderBy: { createdAt: "desc" }, take: 8 }),
+      db.profile.findUnique({ where: { userId: user.id } }),
     ]);
     const eatenKcal = Math.round(logs.reduce((a, l) => a + l.items.reduce((s, i) => s + i.kcal, 0), 0));
     const eatenP = Math.round(logs.reduce((a, l) => a + l.items.reduce((s, i) => s + i.protein, 0), 0));
@@ -39,10 +40,29 @@ export async function POST(req: Request) {
 
     const context = `User context: daily target ${targets?.calories ?? "?"} kcal, protein ${targets?.protein ?? "?"}g. Today so far: ${eatenKcal} kcal, ${eatenP}g protein. User type: ${targets ? "active" : "new"}.`;
 
+    // Health profile (optional, user-reported) — LLM instruction stays English
+    // regardless of locale so the constraint is honored verbatim.
+    const conditions = (profile?.healthConditions ?? "").split(",").map((t) => t.trim()).filter(Boolean);
+    const allergies = (profile?.allergens ?? "").split(",").map((t) => t.trim()).filter(Boolean);
+    const diet = (profile?.dietPreference ?? "").trim();
+    const hasDiet = diet.length > 0 && diet !== "any";
+    let healthContext = "";
+    if (conditions.length > 0 || allergies.length > 0 || hasDiet) {
+      const parts: string[] = [];
+      if (conditions.length > 0) parts.push(`conditions [${conditions.join(", ")}]`);
+      if (allergies.length > 0) parts.push(`allergies [${allergies.join(", ")}]`);
+      if (hasDiet) parts.push(`diet preference [${diet}]`);
+      healthContext =
+        ` Health notes: ${parts.join(", ")}.` +
+        " MUST respect these in every food suggestion — never suggest foods containing allergens;" +
+        " tailor advice to conditions (e.g. diabetes → low glycemic, steady carbs; hypertension → lower sodium;" +
+        " PCOS → lower-GI, anti-inflammatory emphasis). These are user-reported, not diagnoses.";
+    }
+
     const chatMessages = [
       {
         role: "system" as const,
-        content: `You are a friendly nutrition coach inside a calorie tracking app. Reply in ${lang}, max 3 short sentences. Be concrete and practical (suggest actual foods with portions). No medical advice, no weight-shaming. ${context}`,
+        content: `You are a friendly nutrition coach inside a calorie tracking app. Reply in ${lang}, max 3 short sentences. Be concrete and practical (suggest actual foods with portions). No medical advice, no weight-shaming. ${context}${healthContext}`,
       },
       ...history.reverse().map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
       { role: "user" as const, content: parsed.data.message },

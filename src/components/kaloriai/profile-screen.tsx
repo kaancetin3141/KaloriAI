@@ -607,6 +607,29 @@ interface ProfileGet {
   targets: { calories: number; protein: number; carbs: number; fat: number } | null;
 }
 
+/** /api/health-profile yanıtı — canonical token dizileri */
+interface HealthProfileData {
+  conditions: string[];
+  allergies: string[];
+  dietPreference: string;
+}
+
+const HEALTH_CONDITIONS = ["diabetes", "hypertension", "pcos", "cholesterol", "thyroid", "ibs"] as const;
+const HEALTH_ALLERGIES = ["gluten", "lactose", "nuts", "peanut", "egg", "fish", "shellfish", "soy", "sesame"] as const;
+
+/** Bilinmeyen token (onboarding'in serbest metni) → ham metin gösterilir */
+const condLabel = (dict: Dictionary, key: string): string =>
+  dict.healthProfile.conditionsList[key as keyof typeof dict.healthProfile.conditionsList] ?? key;
+const allergyLabel = (dict: Dictionary, key: string): string =>
+  dict.healthProfile.allergiesList[key as keyof typeof dict.healthProfile.allergiesList] ?? key;
+
+const DIET_LABEL_KEYS: Record<string, "vegetarian" | "vegan" | "glutenFree" | "halal"> = {
+  vegetarian: "vegetarian",
+  vegan: "vegan",
+  gluten_free: "glutenFree",
+  halal: "halal",
+};
+
 const REMINDER_TYPES = ["breakfast", "lunch", "dinner", "water", "weigh_in", "workout"] as const;
 type ReminderType = (typeof REMINDER_TYPES)[number];
 const DEFAULT_TIMES: Record<ReminderType, string> = {
@@ -645,6 +668,9 @@ export function ProfileScreen() {
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [sessionsConfirm, setSessionsConfirm] = useState(false);
   const [mealNamesOpen, setMealNamesOpen] = useState(false);
+  const [healthOpen, setHealthOpen] = useState(false);
+  const [hpConditions, setHpConditions] = useState<string[]>([]);
+  const [hpAllergies, setHpAllergies] = useState<string[]>([]);
   const [remOverrides, setRemOverrides] = useState<Partial<Record<ReminderType, { time?: string; enabled?: boolean }>>>({});
   const [notifPerm, setNotifPerm] = useState<NotificationPermission | "unsupported">(() => {
     // ProfileScreen mounts client-side only (after auth gate), safe to read here
@@ -822,6 +848,12 @@ export function ProfileScreen() {
     queryFn: () => api<ProfileGet>("/api/profile"),
   });
 
+  /* Sağlık profili — durumlar + alerjiler (AI koç kişiselleştirmesi) */
+  const healthQ = useQuery<HealthProfileData>({
+    queryKey: ["healthProfile"],
+    queryFn: () => api<HealthProfileData>("/api/health-profile"),
+  });
+
   const remindersQ = useQuery<{ reminders: Reminder[] }>({
     queryKey: ["reminders"],
     queryFn: () => api<{ reminders: Reminder[] }>("/api/reminders"),
@@ -902,6 +934,19 @@ export function ProfileScreen() {
       toast({ title: dict.profile.recalculate });
     },
     onError: () => toast({ title: dict.errors.validation, variant: "destructive" }),
+  });
+
+  const saveHealthProfile = useMutation({
+    mutationFn: (body: { conditions: string[]; allergies: string[] }) =>
+      api<HealthProfileData>("/api/health-profile", { method: "PUT", body }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["healthProfile"] });
+      // profildeki allergens alanı da değişti (aynı Profile satırı) — eski sorgular tazelensin
+      qc.invalidateQueries({ queryKey: ["profile"] });
+      setHealthOpen(false);
+      toast({ description: dict.healthProfile.saved });
+    },
+    onError: () => toast({ description: dict.common.error, variant: "destructive" }),
   });
 
   const patchSettings = useMutation({
@@ -1305,6 +1350,188 @@ export function ProfileScreen() {
           </p>
         </CardContent>
       </Card>
+
+      {/* Health profile — conditions & allergies (AI coach personalization) */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            <span
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10"
+              aria-hidden
+            >
+              <HeartPulse className="h-4 w-4 text-primary" />
+            </span>
+            {dict.healthProfile.title}
+          </CardTitle>
+          <CardDescription>{dict.healthProfile.subtitle}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {healthQ.isPending ? (
+            <div className="space-y-2.5">
+              <Skeleton className="h-4 w-2/3" />
+              <Skeleton className="h-4 w-1/2" />
+            </div>
+          ) : (
+            <>
+              {/* Durumlar */}
+              <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:gap-3">
+                <p className="shrink-0 text-xs font-medium text-muted-foreground sm:w-28 sm:pt-1">
+                  {dict.healthProfile.conditions}
+                </p>
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                  {(healthQ.data?.conditions ?? []).length === 0 ? (
+                    <span className="text-xs text-muted-foreground/80">{dict.healthProfile.empty}</span>
+                  ) : (
+                    (healthQ.data?.conditions ?? []).map((c) => (
+                      <Badge key={c} variant="secondary" className="text-xs">
+                        {condLabel(dict, c)}
+                      </Badge>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Alerjiler */}
+              <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:gap-3">
+                <p className="shrink-0 text-xs font-medium text-muted-foreground sm:w-28 sm:pt-1">
+                  {dict.healthProfile.allergies}
+                </p>
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                  {(healthQ.data?.allergies ?? []).length === 0 ? (
+                    <span className="text-xs text-muted-foreground/80">{dict.healthProfile.empty}</span>
+                  ) : (
+                    (healthQ.data?.allergies ?? []).map((a) => (
+                      <Badge key={a} variant="secondary" className="text-xs">
+                        {allergyLabel(dict, a)}
+                      </Badge>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Beslenme tercihi — yalnız "any" dışında bir değer varsa */}
+              {(() => {
+                const diet = healthQ.data?.dietPreference ?? "any";
+                const labelKey = DIET_LABEL_KEYS[diet];
+                if (!labelKey) return null;
+                return (
+                  <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:gap-3">
+                    <p className="shrink-0 text-xs font-medium text-muted-foreground sm:w-28 sm:pt-1">
+                      {dict.onboarding.diet}
+                    </p>
+                    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                      <Badge
+                        variant="secondary"
+                        className="border-primary/30 bg-primary/5 text-xs text-primary"
+                      >
+                        {dict.onboarding[labelKey]}
+                      </Badge>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div className="flex justify-end">
+                <Button
+                  variant="outline"
+                  className="h-11 w-full justify-center gap-1.5 sm:w-auto"
+                  onClick={() => {
+                    // state'i mevcut token'lardan başlat — effect'siz temiz başlangıç
+                    setHpConditions(healthQ.data?.conditions ?? []);
+                    setHpAllergies(healthQ.data?.allergies ?? []);
+                    setHealthOpen(true);
+                  }}
+                >
+                  <Pencil className="h-4 w-4" aria-hidden />
+                  {dict.healthProfile.edit}
+                </Button>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Health profile edit dialog — multi-select chip groups */}
+      <Dialog open={healthOpen} onOpenChange={setHealthOpen}>
+        <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-md" aria-describedby="health-profile-desc">
+          <DialogHeader className="space-y-1">
+            <DialogTitle className="text-base font-bold">{dict.healthProfile.title}</DialogTitle>
+            <DialogDescription id="health-profile-desc" className="text-xs">
+              {dict.healthProfile.subtitle}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="kai-scroll -mx-1 min-h-0 flex-1 space-y-4 overflow-y-auto px-1">
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">{dict.healthProfile.conditions}</p>
+              <div className="flex flex-wrap gap-2">
+                {HEALTH_CONDITIONS.map((c) => {
+                  const selected = hpConditions.includes(c);
+                  return (
+                    <Button
+                      key={c}
+                      type="button"
+                      size="sm"
+                      variant={selected ? "default" : "outline"}
+                      aria-pressed={selected}
+                      onClick={() =>
+                        setHpConditions((prev) => (selected ? prev.filter((t) => t !== c) : [...prev, c]))
+                      }
+                      className="h-9 min-h-[36px] rounded-full px-3.5 text-xs font-medium"
+                    >
+                      {condLabel(dict, c)}
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">{dict.healthProfile.allergies}</p>
+              <div className="flex flex-wrap gap-2">
+                {HEALTH_ALLERGIES.map((a) => {
+                  const selected = hpAllergies.includes(a);
+                  return (
+                    <Button
+                      key={a}
+                      type="button"
+                      size="sm"
+                      variant={selected ? "default" : "outline"}
+                      aria-pressed={selected}
+                      onClick={() =>
+                        setHpAllergies((prev) => (selected ? prev.filter((t) => t !== a) : [...prev, a]))
+                      }
+                      className="h-9 min-h-[36px] rounded-full px-3.5 text-xs font-medium"
+                    >
+                      {allergyLabel(dict, a)}
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+              <Shield className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+              {dict.healthProfile.hint}
+            </p>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button type="button" variant="ghost" className="h-11" onClick={() => setHealthOpen(false)}>
+              {dict.common.cancel}
+            </Button>
+            <Button
+              type="button"
+              className="h-11 min-w-[120px] gap-1.5"
+              disabled={saveHealthProfile.isPending}
+              onClick={() => saveHealthProfile.mutate({ conditions: hpConditions, allergies: hpAllergies })}
+            >
+              {saveHealthProfile.isPending && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+              {dict.healthProfile.save}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Reminders */}
       <Card>
