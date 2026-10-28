@@ -47,8 +47,8 @@ export async function POST(req: Request) {
     if (!parsed.success) throw new ApiError("VALIDATION", 400);
 
     if (parsed.data.action === "start") {
-      const existing = await db.fastingLog.findFirst({ where: { userId: user.id, endAt: null } });
-      if (existing) throw new ApiError("FASTING_ACTIVE", 409);
+      // Eşzamanlı çift "başlat"a karşı create-then-verify: yarışta iki satır
+      // açılabilir; en yenisi kalır, eskisi anında kapatılır (çift aktif oruç yok).
       const log = await db.fastingLog.create({
         data: {
           userId: user.id,
@@ -56,6 +56,16 @@ export async function POST(req: Request) {
           targetHours: parsed.data.targetHours ?? 16,
         },
       });
+      const strays = await db.fastingLog.findMany({
+        where: { userId: user.id, endAt: null, id: { not: log.id } },
+        select: { id: true },
+      });
+      if (strays.length > 0) {
+        await db.fastingLog.updateMany({
+          where: { id: { in: strays.map((s) => s.id) } },
+          data: { endAt: log.startAt },
+        });
+      }
       return Response.json({ ok: true, active: log });
     }
 

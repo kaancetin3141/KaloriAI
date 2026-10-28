@@ -86,7 +86,9 @@ export async function GET(req: Request) {
         waterMl: future ? 0 : waterMl,
         workoutMin: future ? 0 : workoutMin,
         fasting: future ? false : dayFasting(date),
-        logged: !future && (meal != null || waterMl > 0 || workoutMin > 0),
+        // "logged": tüm ögeleri silinmiş boş öğün kaydı günü dolu göstermesin —
+        // kcal>0 olan gerçek öğün ya da su/antrenman kaydı gerekir.
+        logged: !future && ((meal?.kcal ?? 0) > 0 || waterMl > 0 || workoutMin > 0),
       });
     }
 

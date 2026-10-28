@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { db } from "@/lib/db";
+import { db, upsertMeasurement } from "@/lib/db";
 import { requireUser, errorResponse, ApiError } from "@/lib/auth";
 import { appToday } from "@/lib/tz";
 import { calcTargets, waterTargetMl, type Sex, type Goal, type ActivityLevel, type UserType } from "@/lib/calculations";
@@ -33,6 +33,7 @@ const schema = z.object({
   weeklyRateKg: z.number().min(0.1).max(1).optional(),
   goalWeightKg: z.number().min(25).max(400).optional().nullable(),
   userType: z.enum(["general", "athlete"]).optional(),
+  dietPreference: z.enum(["any", "vegetarian", "vegan"]).optional(),
   recalculate: z.boolean().optional(),
   // Custom meal labels as a JSON-encoded object; null resets to defaults.
   mealNames: z.string().max(400).nullable().optional(),
@@ -109,7 +110,11 @@ export async function PATCH(req: Request) {
             activityLevel: (profilePatch.activityLevel ?? merged.activityLevel ?? "moderate") as ActivityLevel,
             userType: (profilePatch.userType ?? merged.userType ?? "general") as UserType,
           });
-          const trainingDay = (profilePatch.userType ?? merged.userType) === "athlete";
+          // Antrenman günü hedefi: kullanıcı açıkça kapattıysa (trainingDayTarget=false)
+          // yeniden hesaplama sessizce açmamalı — onboarding'deki tercih korunur.
+          const trainingDay =
+            (profilePatch.userType ?? merged.userType) === "athlete" &&
+            (merged.trainingDayTarget ?? false);
           const trainResult = trainingDay
             ? calcTargets(
                 {
@@ -155,9 +160,8 @@ export async function PATCH(req: Request) {
             },
           });
           if (weightKg != null) {
-            await db.bodyMeasurement.create({
-              data: { userId: user.id, date: appToday(), weightKg },
-            });
+            // Aynı güne ikinci kayıtta @@unique([userId, date]) 500 vermesin → upsert
+            await upsertMeasurement(user.id, appToday(), { weightKg });
           }
         }
       }

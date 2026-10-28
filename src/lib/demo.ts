@@ -394,24 +394,108 @@ async function seedMeasurements(
   await db.bodyMeasurement.createMany({ data: rows });
 }
 
+/**
+ * Kuvvet antrenmanı egzersiz şablonları — demo sporcunun gerçekçi progresyonu.
+ * Her tekrar (14 gün = 2 tekrar/gün-tipi) ana kaldırışlarda +stepKg ilerler;
+ * ikinci haftanın üst setleri önceki haftanın e1RM rekorunu geçer → pr:true.
+ */
+interface StrengthExerciseSpec {
+  exerciseKey: string;
+  name: string;
+  muscle: string;
+  equipment: string;
+  /** Set başına tekrar sayısı (ramp: ilk setler daha hafif) */
+  reps: number[];
+  /** Ana kaldırış: PR takibi + daha büyük adım (kg) */
+  baseKg: number;
+  topKg: number;
+  mainLift?: boolean;
+}
+
+const STRENGTH_TEMPLATES: Record<string, StrengthExerciseSpec[]> = {
+  "İtiş (Göğüs-Triceps)": [
+    { exerciseKey: "bench_press", name: "Bench Press", muscle: "chest", equipment: "barbell", reps: [8, 8, 6, 6], baseKg: 70, topKg: 85, mainLift: true },
+    { exerciseKey: "incline_db_press", name: "Incline Dumbbell Press", muscle: "chest", equipment: "dumbbell", reps: [10, 10, 8], baseKg: 24, topKg: 30 },
+    { exerciseKey: "cable_fly", name: "Cable Fly", muscle: "chest", equipment: "cable", reps: [12, 12, 12], baseKg: 15, topKg: 18 },
+    { exerciseKey: "rope_pushdown", name: "Rope Pushdown", muscle: "triceps", equipment: "cable", reps: [12, 12, 10], baseKg: 25, topKg: 30 },
+  ],
+  "Çekiş (Sırt-Biceps)": [
+    { exerciseKey: "deadlift", name: "Deadlift", muscle: "back", equipment: "barbell", reps: [5, 5, 3, 3], baseKg: 120, topKg: 160, mainLift: true },
+    { exerciseKey: "lat_pulldown_wide", name: "Geniş Tutuş Lat Pulldown", muscle: "back", equipment: "cable", reps: [10, 10, 8], baseKg: 50, topKg: 65 },
+    { exerciseKey: "barbell_row", name: "Barbell Row", muscle: "back", equipment: "barbell", reps: [8, 8, 8], baseKg: 60, topKg: 75, mainLift: true },
+    { exerciseKey: "barbell_curl", name: "Barbell Curl", muscle: "biceps", equipment: "barbell", reps: [10, 10, 10], baseKg: 27.5, topKg: 32.5 },
+  ],
+  "Bacak günü": [
+    { exerciseKey: "back_squat", name: "Squat", muscle: "quads", equipment: "barbell", reps: [8, 6, 5, 5], baseKg: 90, topKg: 122.5, mainLift: true },
+    { exerciseKey: "leg_press", name: "Leg Press", muscle: "quads", equipment: "machine", reps: [10, 10, 8], baseKg: 160, topKg: 200 },
+    { exerciseKey: "lying_leg_curl", name: "Lying Leg Curl", muscle: "hamstrings", equipment: "machine", reps: [12, 12, 10], baseKg: 40, topKg: 50 },
+    { exerciseKey: "leg_press_calf_raise", name: "Leg Press Calf Raise", muscle: "calves", equipment: "machine", reps: [15, 15, 15, 12], baseKg: 100, topKg: 130 },
+  ],
+};
+
+/** Epley e1RM — PR bayrağı için (strength.ts ile aynı mantık, tohum tarafına yerel kopya). */
+const e1rm = (w: number, r: number) => w * (1 + Math.min(r, 12) / 30);
+
 async function seedWorkouts(userId: string, dayFn: (dayIndex: number, weekday: number) => WorkoutSpec | undefined, weightKg: number): Promise<void> {
-  const rows: { userId: string; date: string; type: string; name: string; durationMin: number; met: number; intensity: string; calories: number }[] = [];
+  // Kuvvet günleri sırayla ilerler: her tekrar +2.5–5 kg (progresif aşırı yüklenme)
+  const strengthSeen = new Map<string, number>(); // name → kaçıncı tekrar
+  const prevBestByKey = new Map<string, number>(); // exerciseKey → önceki en iyi e1RM
   for (let i = DAYS - 1; i >= 1; i--) {
     const date = localDate(i);
     const w = dayFn(i, weekdayOf(date));
     if (!w) continue;
-    rows.push({
-      userId,
-      date,
-      type: w.type,
-      name: w.name,
-      durationMin: w.durationMin,
-      met: w.met,
-      intensity: w.intensity,
-      calories: workoutCalories(w.met, weightKg, w.durationMin),
+    const workout = await db.workout.create({
+      data: {
+        userId,
+        date,
+        type: w.type,
+        name: w.name,
+        durationMin: w.durationMin,
+        met: w.met,
+        intensity: w.intensity,
+        calories: workoutCalories(w.met, weightKg, w.durationMin),
+      },
     });
+
+    // Kuvvet günü → egzersiz satırları da tohumla (tonaj/PR/ısı haritası canlansın)
+    const template = w.type === "strength" ? STRENGTH_TEMPLATES[w.name] : undefined;
+    if (!template) continue;
+    const occurrence = strengthSeen.get(w.name) ?? 0;
+    strengthSeen.set(w.name, occurrence + 1);
+    const week2 = occurrence >= 1;
+
+    let order = 0;
+    for (const ex of template) {
+      const n = ex.reps.length;
+      // set ağırlıkları ramp: base → top arası lineer; 2. haftada ana kaldırış +2.5
+      const bump = week2 && ex.mainLift ? 2.5 : 0;
+      const runningBest = prevBestByKey.get(ex.exerciseKey) ?? 0;
+      let sessionBest = runningBest;
+      const sets = ex.reps.map((reps, s) => {
+        const t = n <= 1 ? 1 : s / (n - 1);
+        const raw = ex.baseKg + (ex.topKg - ex.baseKg) * t + bump;
+        // plate-friendly yuvarlama (1.25 kg katı)
+        const weightKg = Math.round(raw / 1.25) * 1.25;
+        const metric = e1rm(weightKg, reps);
+        const pr = metric > sessionBest && metric > 0;
+        if (metric > sessionBest) sessionBest = metric;
+        return { reps, weightKg, rir: 1 + (s % 2), ...(pr ? { pr: true } : {}) };
+      });
+      prevBestByKey.set(ex.exerciseKey, sessionBest);
+      await db.workoutExercise.create({
+        data: {
+          userId,
+          workoutId: workout.id,
+          order: order++,
+          exerciseKey: ex.exerciseKey,
+          name: ex.name,
+          muscle: ex.muscle,
+          equipment: ex.equipment,
+          setsJson: JSON.stringify(sets),
+        },
+      });
+    }
   }
-  await db.workout.createMany({ data: rows });
 }
 
 async function seedWater(userId: string, dayFn: (dayIndex: number, rnd: () => number) => number): Promise<void> {

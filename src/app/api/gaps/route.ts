@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { requireUser, errorResponse, ApiError } from "@/lib/auth";
 import { appToday } from "@/lib/tz";
 import { waterTargetMl } from "@/lib/calculations";
+import { excludedByDiet } from "@/lib/diet";
 
 export const runtime = "nodejs";
 
@@ -83,18 +84,19 @@ export async function GET(req: Request) {
 
     // --- katalog: tohumlanmış ortak yiyecekler (kullanıcıya özel olmayan) ---
     const diet = profile?.dietPreference ?? "any";
-    const excluded = new Set<string>(
-      diet === "vegan" ? ["meat", "dairy"] : diet === "vegetarian" ? ["meat"] : []
-    );
     const foods = await db.food.findMany({
       where: { userId: null, deletedAt: null, source: "SEED" },
     });
+    // Diyet filtresi: kategori + isim bazlı tarama (bkz. src/lib/diet.ts)
+    const allowed = foods.filter((f) => !excludedByDiet(f, diet));
 
-    // --- PROTEİN boşluğu: en verimli protein kaynakları ---
+    // --- PROTEİN boşluğu: en verimli protein kaynakları (g/kcal yoğunluğu) ---
     if (gaps.proteinRemaining >= 20) {
-      const proteinFoods = foods
-        .filter((f) => !excluded.has(f.category) && f.protein100 >= 11 && f.kcal100 <= 260)
-        .sort((a, b) => b.protein100 / Math.max(1, a.kcal100) - a.protein100 / Math.max(1, b.kcal100))
+      const proteinFoods = allowed
+        .filter((f) => f.protein100 >= 11 && f.kcal100 <= 260)
+        .sort(
+          (a, b) => b.protein100 / Math.max(1, b.kcal100) - a.protein100 / Math.max(1, a.kcal100)
+        )
         .slice(0, 2);
       for (const f of proteinFoods) {
         // boşluğun ~%55'ini tek porsiyonda kapat (düz 10g adım, 60-300g arası)
@@ -120,10 +122,9 @@ export async function GET(req: Request) {
 
     // --- LİF boşluğu: meyve/sebze/kuruyemiş kaynakları ---
     if (gaps.fiberRemaining >= 6) {
-      const fiberFoods = foods
+      const fiberFoods = allowed
         .filter(
           (f) =>
-            !excluded.has(f.category) &&
             f.fiber100 >= 2.5 &&
             ["fruit", "vegetable", "nut", "grain"].includes(f.category)
         )

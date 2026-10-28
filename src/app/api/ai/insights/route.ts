@@ -12,6 +12,12 @@ export const maxDuration = 60;
 /** In-memory cache (local memory caching policy) */
 const cache = new Map<string, { at: number; text: string }>();
 const TTL = 30 * 60 * 1000;
+/** Bellek sızıntısı koruması: TTL dışı girdiler yazma anında temizlenir. */
+function cacheSweep() {
+  if (cache.size < 64) return;
+  const now = Date.now();
+  for (const [k, v] of cache) if (now - v.at >= TTL) cache.delete(k);
+}
 
 const bodySchema = z.object({ locale: z.enum(["tr", "en"]).default("tr") });
 
@@ -21,7 +27,7 @@ async function gatherWeeklyStats(userId: string) {
   for (let i = 6; i >= 0; i--) {
     days.push(appDaysAgoStr(i));
   }
-  const [logs, targets, workouts, weights, waterLogs] = await Promise.all([
+  const [logs, targets, workouts, weights, waterLogs, streakDates] = await Promise.all([
     db.mealLog.findMany({
       where: { userId, date: { in: days }, deletedAt: null, isTemplate: false },
       include: { items: true },
@@ -33,6 +39,11 @@ async function gatherWeeklyStats(userId: string) {
       orderBy: { date: "asc" },
     }),
     db.waterLog.findMany({ where: { userId, date: { in: days } } }),
+    // Seri tüm zamanların kayıt tarihlerinden hesaplanır (pencereyle sınırlanamaz)
+    db.mealLog.groupBy({
+      by: ["date"],
+      where: { userId, deletedAt: null, isTemplate: false },
+    }),
   ]);
 
   const perDay = days.map((d) => {
@@ -49,7 +60,7 @@ async function gatherWeeklyStats(userId: string) {
     ? perDay.filter((d) => d.kcal > 0 && Math.abs(d.kcal - targets.calories) <= targets.calories * 0.1).length
     : 0;
   const proteinHits = targets ? perDay.filter((d) => d.protein >= targets.protein * 0.9).length : 0;
-  const streak = calcStreak(new Set(logs.map((l) => l.date)));
+  const streak = calcStreak(new Set(streakDates.map((l) => l.date)));
   const workoutCount = workouts.length;
 
   // kilo trendi: yalnız kilo alanı dolu ölçümler; yoksa "unknown" (null sızmasın)
@@ -116,7 +127,10 @@ export async function POST(req: Request) {
         thinking: { type: "disabled" },
       });
       const insight = completion.choices[0]?.message?.content?.trim() || "";
-      if (insight) cache.set(cacheKey, { at: Date.now(), text: insight });
+      if (insight) {
+        cacheSweep();
+        cache.set(cacheKey, { at: Date.now(), text: insight });
+      }
       return { insight, cached: false, stats };
     });
 

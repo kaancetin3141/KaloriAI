@@ -643,6 +643,7 @@ export function TodayScreen() {
         waterMl={d.waterMl}
         waterTargetMl={waterTarget}
         loggedMealTypes={mealStats.filter((m) => m.items > 0).length}
+        fiberTarget={d.profile?.sex === "female" ? 25 : 30}
         dict={dict}
         index={2}
       />

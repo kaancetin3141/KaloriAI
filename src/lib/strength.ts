@@ -247,9 +247,11 @@ export function detectPRs(
   for (const ex of exercises) {
     const prev = prevBestByKey[ex.exerciseKey] ?? 0;
     let newBest = prev;
+    // Çalışan maksimum: aynı seansta 100×5 (e1RM 116.7) sonrası 95×5 (110.8)
+    // PR bayrağı ALMAZ — o set icra edildiğinde rekor zaten kırılmıştı.
     const flags = ex.sets.map((s) => {
       const metric = prMetricOfSet(s.weightKg, s.reps);
-      const isPr = metric > prev && metric > 0;
+      const isPr = metric > prev && metric > newBest && metric > 0;
       if (metric > newBest) newBest = metric;
       return isPr;
     });

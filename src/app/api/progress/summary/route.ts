@@ -12,7 +12,7 @@ export async function GET(req: Request) {
     for (let i = days - 1; i >= 0; i--) {
       dates.push(appDaysAgoStr(i));
     }
-    const [logs, targets, workouts, water, measurements] = await Promise.all([
+    const [logs, targets, workouts, water, measurements, streakDates] = await Promise.all([
       db.mealLog.findMany({
         where: { userId: user.id, date: { in: dates }, deletedAt: null, isTemplate: false },
         include: { items: true },
@@ -23,6 +23,12 @@ export async function GET(req: Request) {
       db.bodyMeasurement.findMany({
         where: { userId: user.id, date: { gte: dates[0] } },
         orderBy: { date: "asc" },
+      }),
+      // Seri tüm zamanların kayıt tarihlerinden hesaplanır: days=7 penceresiyle
+      // sınırlansa 14+ günlük gerçek seriler yanlışlıkla "7"de kırılırdı.
+      db.mealLog.groupBy({
+        by: ["date"],
+        where: { userId: user.id, deletedAt: null, isTemplate: false },
       }),
     ]);
 
@@ -45,7 +51,7 @@ export async function GET(req: Request) {
     const targetKcal = targets?.calories ?? 2000;
     const logged = byDate.filter((d) => d.kcal > 0);
     const hitDays = logged.filter((d) => Math.abs(d.kcal - targetKcal) <= targetKcal * 0.1).length;
-    const streak = calcStreak(new Set(logs.map((l) => l.date)), new Date());
+    const streak = calcStreak(new Set(streakDates.map((l) => l.date)), new Date());
     const avgCalories = logged.length ? Math.round(logged.reduce((a, d) => a + d.kcal, 0) / logged.length) : 0;
     const avgProtein = logged.length ? Math.round(logged.reduce((a, d) => a + d.protein, 0) / logged.length) : 0;
     const mealTiming = ["breakfast", "lunch", "dinner", "snacks"].map((m) => ({

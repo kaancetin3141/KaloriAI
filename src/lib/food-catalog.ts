@@ -185,6 +185,9 @@ export const SEED_FOODS: SeedFood[] = [
   // ─── Temel — Baklagil (sade, pişmiş) ───────────────────────────────────────
   { name: "Haşlanmış Mercimek", nameEn: "Cooked lentils", category: "general", kcal100: 116, protein100: 9, carb100: 20, fat100: 0.4, fiber100: 8, sugar100: 1.8, sodium100: 2, satFat100: 0.1, servings: [{ label: "1 porsiyon", grams: 200 }] },
   { name: "Haşlanmış Nohut", nameEn: "Cooked chickpeas", category: "general", kcal100: 164, protein100: 8.9, carb100: 27, fat100: 2.6, fiber100: 7.6, sugar100: 4.7, sodium100: 7, satFat100: 0.3, servings: [{ label: "1 porsiyon", grams: 200 }] },
+  { name: "Tofu (sert)", nameEn: "Firm tofu", category: "general", kcal100: 144, protein100: 17, carb100: 2.8, fat100: 8.7, fiber100: 2.3, sugar100: 0.6, sodium100: 14, satFat100: 1.3, servings: [{ label: "1 porsiyon", grams: 150 }, { label: "1 dilim", grams: 50 }] },
+  { name: "Edamame", nameEn: "Steamed edamame", category: "general", kcal100: 121, protein100: 12, carb100: 9, fat100: 5.2, fiber100: 5.2, sugar100: 2.2, sodium100: 6, satFat100: 0.6, servings: [{ label: "1 kase", grams: 150 }, { label: "1 avuç (kabuklu)", grams: 80 }] },
+  { name: "Soya Çekirdeği (kavrulmuş)", nameEn: "Roasted soybeans", category: "general", kcal100: 450, protein100: 40, carb100: 32, fat100: 21, fiber100: 13, sugar100: 7, sodium100: 3, satFat100: 3, servings: [{ label: "1 avuç", grams: 30 }, { label: "1 yemek kaşığı", grams: 10 }] },
 
   // ─── Temel — Meyve ─────────────────────────────────────────────────────────
   { name: "Muz", nameEn: "Banana", category: "fruit", kcal100: 89, protein100: 1.1, carb100: 23, fat100: 0.3, fiber100: 2.6, sugar100: 12, sodium100: 1, satFat100: 0.1, servings: [{ label: "1 adet (orta)", grams: 120 }, { label: "1 adet (büyük)", grams: 150 }] },

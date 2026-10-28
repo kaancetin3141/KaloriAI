@@ -48,6 +48,12 @@ export async function POST(req: Request) {
     const user = await requireUser();
     const parsed = schema.safeParse(await req.json());
     if (!parsed.success) throw new ApiError("VALIDATION", 400);
+    // Tarih aralığı: en fazla 1 yıl geriye; gelecek tarih kabul edilmez —
+    // ileri tarihli kayıt defterin "yakılan" toplamlarını ve takvimi kirletir.
+    const workoutDate = parsed.data.date || appToday();
+    if (workoutDate > appToday() || workoutDate < appDaysAgoStr(365)) {
+      throw new ApiError("VALIDATION", 400);
+    }
     const profile = await db.profile.findUnique({ where: { userId: user.id } });
     const weight = profile?.weightKg ?? 70;
     const met = metForIntensity(BASE_METS[parsed.data.type] ?? 5, parsed.data.intensity);
@@ -58,7 +64,7 @@ export async function POST(req: Request) {
     const workout = await db.workout.create({
       data: {
         userId: user.id,
-        date: parsed.data.date || appToday(),
+        date: workoutDate,
         type: parsed.data.type,
         name: parsed.data.name ?? null,
         durationMin: parsed.data.durationMin,

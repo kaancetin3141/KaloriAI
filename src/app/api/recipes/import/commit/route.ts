@@ -89,7 +89,9 @@ export async function POST(req: Request) {
             name: it.name.trim(),
             source: "AI_IMPORT",
             category: "general",
-            kcal100: Math.max(Math.round((it.kcal / g) * 100 * 10) / 10, 0),
+            // 0–900 clamp: foods/create ile aynı üst sınır — degenerate AI satırı
+            // (ör. grams=1) absürt kcal100'ün kataloga/aramaya sızmasını engeller
+            kcal100: Math.min(Math.max(Math.round((it.kcal / g) * 100 * 10) / 10, 0), 900),
             protein100: to100(it.protein),
             carb100: to100(it.carbs),
             fat100: to100(it.fat),

@@ -1,5 +1,6 @@
 import { runReminderScan, schedulerStatus } from "@/lib/scheduler";
 import { ApiError, errorResponse } from "@/lib/auth";
+import { timingSafeEqual } from "crypto";
 
 /**
  * Dış tetikleme yalnızca CRON_SECRET ile: fail-closed.
@@ -9,7 +10,11 @@ import { ApiError, errorResponse } from "@/lib/auth";
 function authorized(req: Request): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false; // fail-closed — sıratanın ayarlanması beklenir
-  return req.headers.get("x-cron-secret") === secret;
+  const given = req.headers.get("x-cron-secret") ?? "";
+  // Sabit zamanlı karşılaştırma: === erken dönüşle uzunluk/sıra bilgisi sızdırır.
+  const a = Buffer.from(secret);
+  const b = Buffer.from(given);
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 /** GET /api/push/cron — scheduler status (running, tz, last scan result) */

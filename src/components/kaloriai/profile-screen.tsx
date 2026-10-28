@@ -43,6 +43,8 @@ import {
   CalendarRange,
   Check,
   Activity,
+  Leaf,
+  Sprout,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -671,6 +673,7 @@ export function ProfileScreen() {
   const [healthOpen, setHealthOpen] = useState(false);
   const [hpConditions, setHpConditions] = useState<string[]>([]);
   const [hpAllergies, setHpAllergies] = useState<string[]>([]);
+  const [hpDiet, setHpDiet] = useState<string>("any");
   const [remOverrides, setRemOverrides] = useState<Partial<Record<ReminderType, { time?: string; enabled?: boolean }>>>({});
   const [notifPerm, setNotifPerm] = useState<NotificationPermission | "unsupported">(() => {
     // ProfileScreen mounts client-side only (after auth gate), safe to read here
@@ -937,7 +940,7 @@ export function ProfileScreen() {
   });
 
   const saveHealthProfile = useMutation({
-    mutationFn: (body: { conditions: string[]; allergies: string[] }) =>
+    mutationFn: (body: { conditions: string[]; allergies: string[]; dietPreference?: string }) =>
       api<HealthProfileData>("/api/health-profile", { method: "PUT", body }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["healthProfile"] });
@@ -1439,6 +1442,7 @@ export function ProfileScreen() {
                     // state'i mevcut token'lardan başlat — effect'siz temiz başlangıç
                     setHpConditions(healthQ.data?.conditions ?? []);
                     setHpAllergies(healthQ.data?.allergies ?? []);
+                    setHpDiet(healthQ.data?.dietPreference ?? "any");
                     setHealthOpen(true);
                   }}
                 >
@@ -1514,6 +1518,33 @@ export function ProfileScreen() {
               <Shield className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
               {dict.healthProfile.hint}
             </p>
+
+            {/* Beslenme tercihi — tek seçim; eksik analiz önerilerini de filtreler */}
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">{dict.onboarding.diet}</p>
+              <div role="radiogroup" aria-label={dict.onboarding.diet} className="flex flex-wrap gap-2">
+                {(["any", "vegetarian", "vegan"] as const).map((d) => {
+                  const selected = hpDiet === d;
+                  const label = dict.onboarding[d === "any" ? "any" : d];
+                  return (
+                    <Button
+                      key={d}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      variant={selected ? "default" : "outline"}
+                      className={`h-11 gap-1.5 ${selected ? "" : "text-muted-foreground"}`}
+                      onClick={() => setHpDiet(d)}
+                    >
+                      {d === "vegetarian" && <Leaf className="h-4 w-4" aria-hidden />}
+                      {d === "vegan" && <Sprout className="h-4 w-4" aria-hidden />}
+                      {d === "any" && <Check className="h-4 w-4" aria-hidden />}
+                      {label}
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
 
           <DialogFooter className="gap-2">
@@ -1524,7 +1555,7 @@ export function ProfileScreen() {
               type="button"
               className="h-11 min-w-[120px] gap-1.5"
               disabled={saveHealthProfile.isPending}
-              onClick={() => saveHealthProfile.mutate({ conditions: hpConditions, allergies: hpAllergies })}
+              onClick={() => saveHealthProfile.mutate({ conditions: hpConditions, allergies: hpAllergies, dietPreference: hpDiet })}
             >
               {saveHealthProfile.isPending && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
               {dict.healthProfile.save}

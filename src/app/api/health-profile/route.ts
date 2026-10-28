@@ -1,10 +1,11 @@
 /**
- * Optional health profile (FitZen-style): conditions + allergies.
+ * Optional health profile (FitZen-style): conditions + allergies + diet.
  * Personalizes the AI coach — canonical comma-separated tokens live on Profile
  * (healthConditions new; allergens reused, onboarding wrote free text before).
  *
  * GET → { conditions[], allergies[], dietPreference }
- * PUT  → upsert canonical tokens (zod enum-guarded); dietPreference untouched.
+ * PUT  → upsert canonical tokens (zod enum-guarded); dietPreference artık
+ *        buradan da değiştirilebilir (onboarding sonrası tek düzenleme yolu).
  */
 import { z } from "zod";
 import { db } from "@/lib/db";
@@ -19,6 +20,7 @@ const ALLERGY_TOKENS = ["gluten", "lactose", "nuts", "peanut", "egg", "fish", "s
 const putSchema = z.object({
   conditions: z.array(z.enum(CONDITION_TOKENS)).max(6),
   allergies: z.array(z.enum(ALLERGY_TOKENS)).max(9),
+  dietPreference: z.enum(["any", "vegetarian", "vegan"]).optional(),
 });
 
 /** "a,b," → ["a","b"] — boş/çöp parçalar ayıklanır, sıra korunur */
@@ -57,17 +59,20 @@ export async function PUT(req: Request) {
     const allergies = [...new Set(parsed.data.allergies)];
 
     // Profile satırı henüz yoksa (onboarding atlandı) oluştur; dietPreference
-    // her iki yolda da dokunulmaz (create default "any", update alan yok).
+    // gönderildiyse her iki yolda da yazılır (gönderilmediyse korunur).
+    const dietPatch = parsed.data.dietPreference ? { dietPreference: parsed.data.dietPreference } : {};
     const profile = await db.profile.upsert({
       where: { userId: user.id },
       create: {
         userId: user.id,
         healthConditions: conditions.join(","),
         allergens: allergies.join(","),
+        ...dietPatch,
       },
       update: {
         healthConditions: conditions.join(","),
         allergens: allergies.join(","),
+        ...dietPatch,
       },
     });
 

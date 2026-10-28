@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { db } from "@/lib/db";
+import { db, upsertMeasurement } from "@/lib/db";
 import { requireUser, errorResponse, ApiError } from "@/lib/auth";
 import { appToday } from "@/lib/tz";
 import { calcTargets, waterTargetMl, type Sex, type Goal, type ActivityLevel, type UserType } from "@/lib/calculations";
@@ -101,9 +101,10 @@ export async function POST(req: Request) {
       },
     });
 
-    // first weight measurement
-    await db.bodyMeasurement.create({
-      data: { userId: user.id, date: appToday(), weightKg: d.weightKg, bodyFatPct: d.bodyFatPct ?? null },
+    // ilk kilo ölçümü — aynı gün yeniden onboard olunsa bile çakışma değil güncelleme
+    await upsertMeasurement(user.id, appToday(), {
+      weightKg: d.weightKg,
+      bodyFatPct: d.bodyFatPct ?? null,
     });
     if (d.locale) {
       await db.user.update({ where: { id: user.id }, data: { locale: d.locale } });

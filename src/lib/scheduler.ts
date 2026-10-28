@@ -144,10 +144,15 @@ export async function runReminderScan(): Promise<ScanResult> {
     const res = await sendPushToUser(r.userId, { title: meta.title, body: meta.body, tag: `reminder-${r.type}`, url: "/" });
     sent += res.sent;
     pruned += res.pruned;
-    await db.reminder
-      .update({ where: { id: r.id }, data: { lastSentDate: now.date } })
-      .catch(() => {});
-    marked += 1;
+    // Yalnız gerçekten gönderildiğinde "bugün gönderildi" işaretle: VAPID anahtarı
+    // yokken ya da geçici ağ hatasında gönderim 0 kalır — hat gibi işaretlenirse
+    // hatırlatma gün boyu kaybolur. sent=0'da işaretlenmez, bir sonraki tur yeniden dener.
+    if (res.sent > 0) {
+      await db.reminder
+        .update({ where: { id: r.id }, data: { lastSentDate: now.date } })
+        .catch(() => {});
+      marked += 1;
+    }
   }
 
   return { tz: APP_TZ, now: now.hhmm, date: now.date, checked: reminders.length, sent, marked, pruned };

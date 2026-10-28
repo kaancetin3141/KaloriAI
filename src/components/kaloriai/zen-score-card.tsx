@@ -53,6 +53,8 @@ interface ZenScoreCardProps {
   waterTargetMl: number;
   /** Bugün kayıt girilmiş öğün tipi sayısı (0-4) */
   loggedMealTypes: number;
+  /** Lif hedefi cinsiyete göre (kadın 25 g, erkek 30 g) — gaps API ile aynı kural */
+  fiberTarget?: number;
   dict: Dictionary;
   /** Stagger gecikmesi için fade indeksi */
   index?: number;
@@ -101,6 +103,7 @@ export function ZenScoreCard({
   waterMl,
   waterTargetMl,
   loggedMealTypes,
+  fiberTarget = 30,
   dict,
   index = 2,
 }: ZenScoreCardProps) {
@@ -114,7 +117,7 @@ export function ZenScoreCard({
   const kcalFit = clamp(kcalBalanceScore(consumedKcal, targetKcal), 0, 40);
   const proteinFit = targetProtein > 0 ? clamp(Math.min(consumedProtein / targetProtein, 1) * 25, 0, 25) : 0;
   const waterFit = waterTargetMl > 0 ? clamp(Math.min(waterMl / waterTargetMl, 1) * 15, 0, 15) : 0;
-  const fiberFit = clamp(Math.min(fiber / 30, 1) * 10, 0, 10);
+  const fiberFit = fiberTarget > 0 ? clamp(Math.min(fiber / fiberTarget, 1) * 10, 0, 10) : 0;
   const completeness = clamp((Math.min(loggedMealTypes, 4) / 4) * 10, 0, 10);
   const score = Math.round(clamp(kcalFit + proteinFit + waterFit + fiberFit + completeness, 0, 100));
 

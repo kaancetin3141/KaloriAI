@@ -15,13 +15,23 @@ export async function POST(req: Request) {
     const parsed = schema.safeParse(await req.json());
     if (!parsed.success) throw new ApiError("VALIDATION", 400);
     const date = parsed.data.date || appToday();
-    const existing = await db.waterLog.findFirst({ where: { userId: user.id, date } });
-    const ml = Math.max(0, (existing?.ml ?? 0) + parsed.data.deltaMl);
-    const log = existing
-      ? await db.waterLog.update({ where: { id: existing.id }, data: { ml } })
-      : await db.waterLog.create({ data: { userId: user.id, date, ml } });
-    const profile = await db.profile.findUnique({ where: { userId: user.id } });
-    return Response.json({ ok: true, waterMl: log.ml, target: waterTargetMl(profile?.weightKg ?? null) });
+    // Atomic upsert + increment: iki eşzamanlı "+250 ml" dokunuşu 500 ml olur,
+    // kayıp güncelleme olmaz (eski find→update/create deseni yarış kaybediyordu).
+    await db.waterLog.upsert({
+      where: { userId_date: { userId: user.id, date } },
+      create: { userId: user.id, date, ml: Math.max(0, parsed.data.deltaMl) },
+      update: { ml: { increment: parsed.data.deltaMl } },
+    });
+    // negatif delta toplamı 0'ın altına düşürdüyse kelepçele (koşullu, yarış güvenli)
+    await db.waterLog.updateMany({
+      where: { userId: user.id, date, ml: { lt: 0 } },
+      data: { ml: 0 },
+    });
+    const [row, profile] = await Promise.all([
+      db.waterLog.findUnique({ where: { userId_date: { userId: user.id, date } } }),
+      db.profile.findUnique({ where: { userId: user.id } }),
+    ]);
+    return Response.json({ ok: true, waterMl: row?.ml ?? 0, target: waterTargetMl(profile?.weightKg ?? null) });
   } catch (e) {
     return errorResponse(e);
   }

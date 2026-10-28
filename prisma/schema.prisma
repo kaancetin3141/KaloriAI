@@ -230,7 +230,7 @@ model WaterLog {
   ml       Int
   createdAt DateTime @default(now())
 
-  @@index([userId, date])
+  @@unique([userId, date]) // gün başına tek satır: eşzamanlı +ml isteklerinde kayıp yok
 }
 
 model Workout {

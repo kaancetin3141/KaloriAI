@@ -31,11 +31,32 @@ export async function GET(req: Request) {
     const days = Math.min(Math.max(Number(url.searchParams.get("days")) || 7, 1), 90);
     const since = appDaysAgoStr(days - 1);
 
-    // All logged exercise rows in range
-    const rows = await db.workoutExercise.findMany({
-      where: { userId: user.id, createdAt: { gte: new Date(`${since}T00:00:00.000Z`) } },
+    // Pencere dışı tüm zamanların en iyileri: pencere içindeki ilk kayıt sahte
+    // "PR" sayılmaz — gerçek PR yalnız tüm zamanlar rekorunu geçen set.
+    const baselineRows = await db.workoutExercise.findMany({
+      where: { userId: user.id, workout: { date: { lt: since }, type: "strength" } },
+      select: { exerciseKey: true, setsJson: true },
       orderBy: { createdAt: "asc" },
-      select: { createdAt: true, exerciseKey: true, name: true, muscle: true, setsJson: true },
+    });
+    const bestSoFar = new Map<string, number>();
+    for (const row of baselineRows) {
+      const sets = parseSets(row.setsJson);
+      const metric = sets.reduce((b, s) => Math.max(b, prMetricOfSet(s.weightKg, s.reps)), 0);
+      if (metric > (bestSoFar.get(row.exerciseKey) ?? 0)) bestSoFar.set(row.exerciseKey, metric);
+    }
+
+    // Pencere içi egzersiz satırları SEANS TARİHİNE göre: geriye dönük (backdate)
+    // kayıt girildiğinde createdAt pencere dışında kalıyordu → tonaj/set 0 görünüyordu.
+    const rows = await db.workoutExercise.findMany({
+      where: { userId: user.id, workout: { date: { gte: since }, type: "strength" } },
+      orderBy: [{ workout: { date: "asc" } }, { createdAt: "asc" }],
+      select: {
+        workout: { select: { date: true } },
+        exerciseKey: true,
+        name: true,
+        muscle: true,
+        setsJson: true,
+      },
     });
 
     const volumeByMuscle: Record<string, { volume: number; sets: number }> = {};
@@ -43,9 +64,6 @@ export async function GET(req: Request) {
     const recentPRs: PrEntry[] = [];
     let totalSets = 0;
     let totalVolume = 0;
-
-    // Track best-so-far to detect PRs chronologically
-    const bestSoFar = new Map<string, number>();
 
     for (const row of rows) {
       const sets = parseSets(row.setsJson);
@@ -66,7 +84,7 @@ export async function GET(req: Request) {
         if (sessionMetric > prev) {
           const prSet = sets.find((s) => prMetricOfSet(s.weightKg, s.reps) === sessionMetric)!;
           recentPRs.push({
-            date: row.createdAt.toISOString(),
+            date: row.workout.date,
             exerciseKey: row.exerciseKey,
             name: row.name,
             weightKg: prSet.weightKg,
