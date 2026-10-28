@@ -70,8 +70,8 @@ bun run build                # .next/standalone üretir (build script statik+pub
 İlk çalıştırma + DB optimizasyonu (WAL):
 
 ```bash
-NODE_ENV=production bun .next/standalone/server.js &   # test: :3000 dinler
-curl -s localhost:3000/api/auth/demo | head -c 80      # "accounts" JSON dönmeli
+NODE_ENV=production bun .next/standalone/server.js &   # test: :3003 dinler
+curl -s localhost:3003/api/auth/demo | head -c 80      # "accounts" JSON dönmeli
 ```
 
 ## 4. systemd Servisi
@@ -134,7 +134,7 @@ sudo -iu kaloriai ./deploy.sh        # pull → install → generate → db push
 - [ ] `ufw`: sadece 22/80/443 açık (`sudo ufw allow OpenSSH && sudo ufw allow 'Nginx Full' && sudo ufw enable`)
 - [ ] Günlük yedek cron çalışıyor (bir yedeği manuel test edin)
 - [ ] `journalctl -u kaloriai` temiz (Exception yok)
-- [ ] **Node doğrudan dışa açık DEĞİL**: yalnız nginx `127.0.0.1:3000`'e bağlanabilmeli; uygulama içi rate limiter `X-Real-IP`/`X-Forwarded-For` SON elemanından IP okur — nginx şablonundaki `proxy_set_header X-Real-IP $remote_addr` satırı aktif olmalı (aksi halde header spoof ile limitleme bypass edilebilir)
+- [ ] **Node doğrudan dışa açık DEĞİL**: yalnız nginx `127.0.0.1:3003`'e bağlanabilmeli; uygulama içi rate limiter `X-Real-IP`/`X-Forwarded-For` SON elemanından IP okur — nginx şablonundaki `proxy_set_header X-Real-IP $remote_addr` satırı aktif olmalı (aksi halde header spoof ile limitleme bypass edilebilir)
 
 ## 9. Bilinen Mimari Sınırlar (ölçekleme)
 
@@ -192,7 +192,7 @@ sudo -u kaloriai rm -f /opt/kaloriai/db/custom.db-wal /opt/kaloriai/db/custom.db
 sudo -u kaloriai gunzip -c /opt/kaloriai/db/backups/kaloriai-YYYYMMDD-HHMMSS.db.gz > /opt/kaloriai/db/custom.db
 
 sudo systemctl start kaloriai
-curl -s localhost:3000/api/auth/demo | head -c 80   # sağlık kontrolü
+curl -s localhost:3003/api/auth/demo | head -c 80   # sağlık kontrolü
 ```
 
 > Not: yalnız DB geri yüklenir — `upload/` içindeki AI fotoğrafları

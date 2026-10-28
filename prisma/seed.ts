@@ -8,7 +8,12 @@
 import { PrismaClient } from "@prisma/client";
 import { ensureSeedFoods } from "../src/lib/food-catalog";
 
-process.env.DATABASE_URL ??= "file:/home/z/my-project/db/custom.db";
+if (!process.env.DATABASE_URL) {
+  console.error(
+    "DATABASE_URL ayarli degil — .env dosyasini olusturun (bkz. .env.example)"
+  );
+  process.exit(1);
+}
 
 const prisma = new PrismaClient();
 

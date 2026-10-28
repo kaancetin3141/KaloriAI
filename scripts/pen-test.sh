@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # KaloriAI — Active penetration test suite (pre-launch, extended v2)
-# Target: http://localhost:3000 (+ gateway :81 for T29)
+# Target: http://localhost:3003 (+ gateway :81 for T29)
 # v2: benzersiz test hesabı (tekrarlanabilir koşum), oturum kurulumu garantili,
 #     T29-T42 yeni saldırı vektörleri, koşum sonu hesap temizliği (KVKK).
 set -u
-BASE="http://localhost:3000"
+BASE="http://localhost:3003"
 GW="http://localhost:81"
 TS=$(date +%s)
 PT_EMAIL="pentest-${TS}@kaloriai.dev"
@@ -84,7 +84,7 @@ r=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application
   -d '{"email":"a@b.com","password":"x"}' "$BASE/api/auth/login")
 [[ "$r" == "403" ]] && ok "cross-site Origin → 403" || bad "cross-site geçti → $r"
 r=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" \
-  -H "Origin: http://localhost:3000" -d '{"demoId":"athlete"}' "$BASE/api/auth/demo")
+  -H "Origin: http://localhost:3003" -d '{"demoId":"athlete"}' "$BASE/api/auth/demo")
 [[ "$r" == "200" ]] && ok "same-origin Origin → 200 (meşru akış çalışıyor)" || bad "same-origin engellendi → $r"
 
 # ─────────────────────────────────────────────
@@ -123,7 +123,7 @@ hdr "T7 — IDOR: başka kullanıcının özel dosyası"
 # Demo hesabıyla gerçek bir yabancı kullanıcı kimliği al (dosya VARLIĞI gerekmez —
 # sahiplik kontrolü dosya okumadan ÖNCE gelir → sahte dosya adıyla bile 403 beklenir)
 curl -s -c /tmp/pt_demo.jar -X POST -H "Content-Type: application/json" \
-  -H "Origin: http://localhost:3000" -d '{"demoId":"athlete"}' "$BASE/api/auth/demo" > /dev/null
+  -H "Origin: http://localhost:3003" -d '{"demoId":"athlete"}' "$BASE/api/auth/demo" > /dev/null
 OTHER_UID=$(curl -s -b /tmp/pt_demo.jar "$BASE/api/auth/me" | jget '.user.id')
 if [[ -n "$OTHER_UID" && "$OTHER_UID" != "null" ]]; then
   r=$(curl -s -o /dev/null -w "%{http_code}" -b "$JAR" "$BASE/api/files/ai/$OTHER_UID/nonexistent-probe.jpg")
@@ -154,7 +154,7 @@ code=$(curl -s -o /dev/null -w "%{http_code}" -b "$JAR" "$BASE/api/files/ai/$PT_
 
 # ─────────────────────────────────────────────
 hdr "T9 — SSRF: recipes/import iç ağ hedefleri"
-for target in "http://localhost:3000/" "http://127.0.0.1:3000/api/auth/me" "http://169.254.169.254/latest/meta-data/" "file:///etc/passwd" "http://0.0.0.0:3000/" "http://[::1]:3000/" "http://10.0.0.1/" "https://metadata.google.internal/";
+for target in "http://localhost:3003/" "http://127.0.0.1:3003/api/auth/me" "http://169.254.169.254/latest/meta-data/" "file:///etc/passwd" "http://0.0.0.0:3003/" "http://[::1]:3003/" "http://10.0.0.1/" "https://metadata.google.internal/";
 do
   R=$(curl -s -b "$JAR" -X POST -H "Content-Type: application/json" \
     -d "{\"url\":\"$target\",\"locale\":\"tr\"}" "$BASE/api/recipes/import")
@@ -194,7 +194,7 @@ echo "$P" | grep -q '"isAdmin"' && bad "profil mass-assignment sızıntı!" || o
 # ─────────────────────────────────────────────
 hdr "T12 — Çerez güvenlik öznitelikleri"
 COOKIE=$(curl -s -D - -o /dev/null -X POST -H "Content-Type: application/json" \
-  -H "Origin: http://localhost:3000" -d '{"demoId":"weightloss"}' "$BASE/api/auth/demo" | grep -i "set-cookie")
+  -H "Origin: http://localhost:3003" -d '{"demoId":"weightloss"}' "$BASE/api/auth/demo" | grep -i "set-cookie")
 echo "$COOKIE" | grep -qi "httponly" && ok "HttpOnly var" || bad "HttpOnly YOK"
 echo "$COOKIE" | grep -qi "samesite" && ok "SameSite var" || bad "SameSite YOK"
 
@@ -254,7 +254,7 @@ hdr "T19 — Content-Type confusion + cross-site text/plain (klasik CSRF bypass 
 r=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: text/plain" -H "Sec-Fetch-Site: cross-site" \
   -d '{"email":"pentester@kaloriai.dev","password":"Pent3st!2026"}' "$BASE/api/auth/login")
 [[ "$r" == "403" ]] && ok "cross-site text/plain JSON gövdesi → 403 (CSRF bypass kapalı)" || bad "text/plain cross-site geçti → $r"
-r=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Origin: http://localhost:3000" \
+r=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Origin: http://localhost:3003" \
   -d '{"email":"'"$PT_EMAIL"'","password":"'"$PT_PASS"'"}' "$BASE/api/auth/login")
 [[ "$r" != "5"* && "$r" != "403" ]] && ok "content-type'sız same-origin → $r (500 yok)" || bad "content-type'sız → $r"
 
@@ -336,9 +336,9 @@ done
 # ─────────────────────────────────────────────
 hdr "T28 — Oturum token tazeliği (her girişte YENİ token)"
 C1=$(curl -s -D - -o /dev/null -X POST -H "Content-Type: application/json" \
-  -H "Origin: http://localhost:3000" -d '{"demoId":"weightloss"}' "$BASE/api/auth/demo" | grep -i "set-cookie" | grep -o "kaloriai_session=[^;]*" | cut -d= -f2)
+  -H "Origin: http://localhost:3003" -d '{"demoId":"weightloss"}' "$BASE/api/auth/demo" | grep -i "set-cookie" | grep -o "kaloriai_session=[^;]*" | cut -d= -f2)
 C2=$(curl -s -D - -o /dev/null -X POST -H "Content-Type: application/json" \
-  -H "Origin: http://localhost:3000" -d '{"demoId":"weightloss"}' "$BASE/api/auth/demo" | grep -i "set-cookie" | grep -o "kaloriai_session=[^;]*" | cut -d= -f2)
+  -H "Origin: http://localhost:3003" -d '{"demoId":"weightloss"}' "$BASE/api/auth/demo" | grep -i "set-cookie" | grep -o "kaloriai_session=[^;]*" | cut -d= -f2)
 [[ -n "$C1" && -n "$C2" && "$C1" != "$C2" ]] && ok "iki demo girişi → farklı tokenlar (fixasyon yok)" || warn "tokenlar aynı/bos — manuel kontrol: len1=${#C1} len2=${#C2}"
 
 # ─────────────────────────────────────────────
@@ -371,7 +371,7 @@ done
 # 2) Yabancı kullanıcının gerçek işini yoklama: demo hesabı bir parse-text işi
 #    başlatsın, pentester o jobId ile yoklama denesin → sahiplik reddi
 PJ=$(curl -s -b /tmp/pt_demo.jar -X POST -H "Content-Type: application/json" \
-  -H "Origin: http://localhost:3000" -d '{"text":"1 elma","locale":"tr"}' "$BASE/api/ai/parse-text")
+  -H "Origin: http://localhost:3003" -d '{"text":"1 elma","locale":"tr"}' "$BASE/api/ai/parse-text")
 FJOB=$(echo "$PJ" | jget '.jobId')
 if [[ -n "$FJOB" && "$FJOB" != "null" ]]; then
   FR=$(curl -s -b "$JAR" "$BASE/api/ai/parse-text?id=$FJOB")

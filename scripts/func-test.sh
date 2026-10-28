@@ -4,11 +4,11 @@
 # Her koşum BENZERSİZ bir test kullanıcısı oluşturur ve sonunda hesabı siler (KVKK).
 # AI uçları gerçek AI çağrısı yapar (async job + yoklama deseni).
 #
-# Kullanım: bash scripts/func-test.sh   (dev server 3000 açık olmalı)
+# Kullanım: bash scripts/func-test.sh   (dev server 3003 açık olmalı)
 # Not: Önceki koşumdan <1 dk geçtiyse login/register limiteri (10/dk, 5/5dk)
 # bekletebilir; script otomatik bekleyip tekrar dener.
 set -u
-BASE="http://localhost:3000"
+BASE="http://localhost:3003"
 TS=$(date +%s)
 EMAIL="qa-${TS}@kaloriai.dev"
 PW="Qa!${TS}aA"

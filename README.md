@@ -39,7 +39,7 @@ bun run db:push
 # 3) Türk yemekleri seed (101 gıda / 162 porsiyon — idempotent)
 bun prisma/seed.ts
 
-# 4) Geliştirme sunucusu (http://localhost:3000)
+# 4) Geliştirme sunucusu (http://localhost:3003)
 bun run dev
 ```
 
@@ -109,9 +109,9 @@ Uygulama yayından önce statik analiz + aktif sızma testinden geçirildi (`scr
 ```bash
 cp .env.example .env        # DATABASE_URL vb.
 bun install
-bun run db:push             # şemayı SQLite'a uygula
+bun run db:push             # şemayı PostgreSQL'e uygula
 bun run db:generate         # Prisma client
-bun run dev                 # http://localhost:3000
+bun run dev                 # http://localhost:3003
 ```
 
 Sağlık kontrolü: `bun scripts/db-check.ts` (bütünlük + FK + yetim kayıt + veri sanity) · Sızma testi: `bash scripts/pen-test.sh` (çalışan sunucuya karşı 57 kontrol)
